@@ -1,14 +1,14 @@
 default_prompt: |
   No new user input. Continue working autonomously.
-  Re-read your start instructions and notes if your context has been compacted.
+  Re-read your start instructions.md, claude.md, tasks.md and notes.md if your context has been compacted.
   Check your task list and notes for pending work.
   If nothing is pending, review recent changes, check for improvements, or plan ahead.
-  Do NOT wait for the user — they will reach out when they need you.
+  Do NOT wait for the user — they will reach out when they need you. Don t forget you can only talk to the user using the message_user mcp tool. Always write down all informations like instructed and do a git commit and push afterwards. This is a default prompt, if your read this it may means that you failed to create your own continue prompt using the selfcontrol mcp! Try to generate your own prompts to stay active! This prompt here gets triggered every 5 minutes if no other prompt is placed.
 base_dir: ~/.ai-sessions
-check_interval_seconds: 10
+check_interval_seconds: 30
 default_prompt_interval_minutes: 5
 generating_timeout_minutes: 30
 permission_timeout_minutes: 10
-permission_timeout_message: "Permission denied (timeout)."
+permission_timeout_message: "Permission denied — the user did not respond in time. Avoid tools that require approval. Stick to the allowed tools you have noted down. The user may not be available to monitor permission requests right now."
 telegram_bot_token: ""
 telegram_user_id: 0
