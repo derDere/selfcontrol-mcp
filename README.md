@@ -33,7 +33,8 @@ flowchart LR
 | `telebot_runner.py` | Telegram bot — user ↔ AI communication |
 | `reset_generating.py` | Hook script — clears the generating lock after AI finishes |
 | `setup.py` | Interactive setup wizard — configures everything |
-| `config.yaml` | Default prompt, intervals, paths, Telegram credentials |
+| `config.yaml` | Default prompt, intervals, paths, Telegram credentials (gitignored) |
+| `example.config.yaml` | Template for `config.yaml` |
 
 ## Setup
 
