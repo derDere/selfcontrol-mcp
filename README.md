@@ -34,6 +34,7 @@ flowchart LR
 | `reset_generating.py` | Hook script — clears the generating lock after AI finishes |
 | `notify_user.py` | Hook script — notifies user via Telegram when AI needs attention |
 | `permission_handler.py` | Hook script — remote permission approval via Telegram |
+| `session_mapper.py` | Shared session name encoding/decoding and tmux pane detection |
 | `setup.py` | Interactive setup wizard — configures everything |
 | `config.yaml` | Default prompt, intervals, paths, Telegram credentials (gitignored) |
 | `example.config.yaml` | Template for `config.yaml` |

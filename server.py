@@ -29,8 +29,7 @@ def load_config() -> dict:
         return yaml.safe_load(f) or {}
 
 
-def encode_session_name(name: str) -> str:
-    return "s_" + name.replace(":", "_").replace(".", "_")
+from session_mapper import encode_session_name
 
 
 class NotInTmuxError(Exception):

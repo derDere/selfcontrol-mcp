@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Telegram bot for selfcontrol-mcp user communication."""
 
-import json
 import logging
 import random
 import string
@@ -10,6 +9,15 @@ from pathlib import Path
 
 import telebot
 import yaml
+
+from session_mapper import (
+    encode_session_name,
+    escape_for_markdown,
+    decode_session_command as _decode_session,
+    load_session_map,
+    save_session_map,
+    refresh_session_map as _refresh_session_map,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -44,38 +52,13 @@ active_session: dict[int, str] = {}
 
 # --- Session map ---
 
-def encode_session_name(name: str) -> str:
-    return "s_" + name.replace(":", "_").replace(".", "_")
-
-
 def decode_session_command(cmd: str) -> str | None:
-    session_map = load_session_map()
-    return session_map.get(cmd)
-
-
-def load_session_map() -> dict:
-    if SESSION_MAP_PATH.exists():
-        with open(SESSION_MAP_PATH) as f:
-            return json.load(f)
-    return {}
-
-
-def save_session_map(mapping: dict) -> None:
-    BASE_DIR.mkdir(parents=True, exist_ok=True)
-    with open(SESSION_MAP_PATH, "w") as f:
-        json.dump(mapping, f, indent=2)
-        f.write("\n")
+    session_map = load_session_map(SESSION_MAP_PATH)
+    return _decode_session(cmd, session_map)
 
 
 def refresh_session_map() -> dict:
-    mapping = {}
-    if BASE_DIR.is_dir():
-        for entry in sorted(BASE_DIR.iterdir()):
-            if entry.is_dir() and entry.name != "__pycache__":
-                encoded = encode_session_name(entry.name)
-                mapping[encoded] = entry.name
-    save_session_map(mapping)
-    return mapping
+    return _refresh_session_map(BASE_DIR, SESSION_MAP_PATH)
 
 
 def get_active_session(user_id: int) -> str | None:
@@ -163,7 +146,7 @@ def handle_current(message):
     log.info("[/current] user_id=%s, session=%s", message.from_user.id, session)
     if session:
         encoded = encode_session_name(session)
-        escaped = encoded.replace("_", "\\_")
+        escaped = escape_for_markdown(encoded)
         bot.reply_to(message, f"Active session: `{session}`\nSwitch command: /{escaped}", parse_mode="Markdown")
     else:
         bot.reply_to(message, "No active session.")
@@ -201,7 +184,7 @@ def handle_sessions(message):
     lines = ["*Sessions:*\n"]
     for encoded, real_name in mapping.items():
         marker = " ← active" if real_name == current else ""
-        escaped = encoded.replace("_", "\\_")
+        escaped = escape_for_markdown(encoded)
         lines.append(f"/{escaped} → `{real_name}`{marker}")
 
     bot.reply_to(message, "\n".join(lines), parse_mode="Markdown")

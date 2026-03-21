@@ -74,6 +74,7 @@ Seven Python scripts:
 | `reset_generating.py` | Hook script to clear generating lock |
 | `notify_user.py` | Hook script to notify user via Telegram when AI needs attention |
 | `permission_handler.py` | Hook script for remote permission approval via Telegram |
+| `session_mapper.py` | Shared session name encoding/decoding and tmux pane detection |
 | `setup.py` | Interactive setup wizard |
 | `config.yaml` | Default prompt, base_dir, intervals, Telegram credentials |
 | `start.md` | User-edited startup prompt (gitignored) |

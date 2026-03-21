@@ -3,7 +3,6 @@
 
 import json
 import sys
-import subprocess
 from pathlib import Path
 
 import telebot
@@ -13,21 +12,7 @@ SCRIPT_DIR = Path(__file__).parent
 CONFIG_PATH = SCRIPT_DIR / "config.yaml"
 
 
-def get_pane_id() -> str:
-    try:
-        result = subprocess.run(
-            ["tmux", "display-message", "-p", "#{session_name}:#{window_index}.#{pane_index}"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if result.returncode == 0:
-            return result.stdout.strip()
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-    return "unknown"
-
-
-def encode_session_name(name: str) -> str:
-    return "s_" + name.replace(":", "_").replace(".", "_")
+from session_mapper import encode_session_name, get_pane_id
 
 
 def main() -> None:
