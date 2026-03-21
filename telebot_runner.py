@@ -148,6 +148,7 @@ def handle_help(message):
         "/current — Show current active session\n"
         "/sessions — List all sessions with switch commands\n"
         "/s\\_ENCODED — Switch to a session\n"
+        "/unlock — Remove generating lock for active session\n"
         "/help — This message\n\n"
         "Any text message is sent to the active session as a prompt.",
         parse_mode="Markdown",
@@ -166,6 +167,24 @@ def handle_current(message):
         bot.reply_to(message, f"Active session: `{session}`\nSwitch command: /{escaped}", parse_mode="Markdown")
     else:
         bot.reply_to(message, "No active session.")
+
+
+@bot.message_handler(commands=["unlock"])
+def handle_unlock(message):
+    if not is_authorized(message):
+        return
+    session = get_active_session(message.from_user.id)
+    if not session:
+        bot.reply_to(message, "No active session.")
+        return
+    lock_path = BASE_DIR / session / "generating.lock"
+    if lock_path.exists():
+        lock_path.unlink()
+        log.info("[/unlock] user_id=%s, session=%s — lock removed", message.from_user.id, session)
+        bot.reply_to(message, f"Lock removed for `{session}`", parse_mode="Markdown")
+    else:
+        log.info("[/unlock] user_id=%s, session=%s — no lock found", message.from_user.id, session)
+        bot.reply_to(message, f"No lock found for `{session}`", parse_mode="Markdown")
 
 
 @bot.message_handler(commands=["sessions"])
