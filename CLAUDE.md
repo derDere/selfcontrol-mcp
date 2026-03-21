@@ -10,7 +10,7 @@ License: GPL v3
 
 ## Architecture
 
-Five Python scripts:
+Six Python scripts:
 
 1. **MCP Server** (`server.py`) — FastMCP server exposing:
    - **Tools:** `prompt_now(message)`, `prompt_later(message, target_time?, delay?)`, `message_user(message, file_path?)`
@@ -34,11 +34,13 @@ Five Python scripts:
 
 4. **Hook Script** (`reset_generating.py`) — Called by Claude Code `Stop` hook after generation completes. Detects current tmux pane and deletes the corresponding `generating.lock`. Silently does nothing if not in tmux.
 
-5. **Setup Wizard** (`setup.py`) — Interactive questionary-based setup that:
+5. **Notification Script** (`notify_user.py`) — Called by Claude Code `Notification` hook when the AI needs user attention (e.g. waiting for permission approval). Sends a Telegram message with session info.
+
+6. **Setup Wizard** (`setup.py`) — Interactive questionary-based setup that:
    - Creates `start.md` from `example.start.md`
    - Configures `config.yaml` with sensible defaults
    - Configures Telegram bot token and user ID
-   - Installs the `Stop` hook in `~/.claude/settings.json`
+   - Installs the `Stop` and `Notification` hooks in `~/.claude/settings.json`
 
 ## Session Folder Structure (`~/.ai-sessions/`)
 
@@ -60,6 +62,7 @@ Five Python scripts:
 | `scheduler.py` | Background prompt scheduler |
 | `telebot_runner.py` | Telegram bot for user communication |
 | `reset_generating.py` | Hook script to clear generating lock |
+| `notify_user.py` | Hook script to notify user via Telegram when AI needs attention |
 | `setup.py` | Interactive setup wizard |
 | `config.yaml` | Default prompt, base_dir, intervals, Telegram credentials |
 | `start.md` | User-edited startup prompt (gitignored) |

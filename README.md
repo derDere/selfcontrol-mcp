@@ -10,7 +10,7 @@ If the AI hasn't scheduled anything, the scheduler falls back to manually placed
 
 The user communicates with the AI through a Telegram bot. Messages sent in Telegram are delivered as prompts to the active AI session. The AI communicates back via `message_user`, which sends Telegram messages directly.
 
-A file-based generating lock prevents the scheduler from interrupting the AI mid-generation. A Claude Code `Stop` hook clears the lock when the AI finishes responding.
+A file-based generating lock prevents the scheduler from interrupting the AI mid-generation. A Claude Code `Stop` hook clears the lock when the AI finishes responding. A `Notification` hook alerts the user via Telegram when the AI needs attention (e.g. waiting for permission approval).
 
 ```mermaid
 flowchart LR
@@ -32,6 +32,7 @@ flowchart LR
 | `scheduler.py` | Background scheduler — delivers prompts via tmux |
 | `telebot_runner.py` | Telegram bot — user ↔ AI communication |
 | `reset_generating.py` | Hook script — clears the generating lock after AI finishes |
+| `notify_user.py` | Hook script — notifies user via Telegram when AI needs attention |
 | `setup.py` | Interactive setup wizard — configures everything |
 | `config.yaml` | Default prompt, intervals, paths, Telegram credentials (gitignored) |
 | `example.config.yaml` | Template for `config.yaml` |
@@ -98,7 +99,7 @@ The wizard will:
 - Create `start.md` from the example template (your AI's startup instructions)
 - Configure `config.yaml` with sensible defaults
 - Ask for your Telegram bot token and user ID
-- Install the `Stop` hook in `~/.claude/settings.json`
+- Install the `Stop` and `Notification` hooks in `~/.claude/settings.json`
 
 ### 5. Register the MCP server with Claude Code
 
