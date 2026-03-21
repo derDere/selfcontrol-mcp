@@ -1,0 +1,5 @@
+default_prompt: Continue working on the current task. If no task is active, review
+  recent changes and suggest improvements.
+base_dir: ~/.ai-sessions
+check_interval_seconds: 60
+generating_timeout_minutes: 30
