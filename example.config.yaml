@@ -5,7 +5,10 @@ default_prompt: |
   If nothing is pending, review recent changes, check for improvements, or plan ahead.
   Do NOT wait for the user — they will reach out when they need you.
 base_dir: ~/.ai-sessions
-check_interval_seconds: 60
+check_interval_seconds: 10
+default_prompt_interval_minutes: 5
 generating_timeout_minutes: 30
+permission_timeout_minutes: 10
+permission_timeout_message: "Permission denied (timeout)."
 telegram_bot_token: ""
 telegram_user_id: 0

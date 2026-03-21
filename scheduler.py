@@ -7,6 +7,9 @@ from datetime import datetime
 
 import yaml
 
+# Tracks when a prompt was last sent to each session (any type: queue, input, or default)
+_last_prompt_time: dict[str, datetime] = {}
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -127,6 +130,14 @@ def process_session(session_dir: Path, config: dict) -> None:
             consumed_file = input_file
 
     if prompt_text is None:
+        default_interval = config.get("default_prompt_interval_minutes", 5)
+        last_time = _last_prompt_time.get(pane_target)
+        if last_time is not None:
+            elapsed = (datetime.now() - last_time).total_seconds() / 60
+            if elapsed < default_interval:
+                log.debug("Skipping default for %s — last prompt %.1f min ago (interval: %d min)",
+                          pane_target, elapsed, default_interval)
+                return
         prompt_text = config.get("default_prompt", "Continue.")
         source = "default"
 
@@ -147,6 +158,7 @@ def process_session(session_dir: Path, config: dict) -> None:
     if not send_prompt(pane_target, prompt_text):
         return
 
+    _last_prompt_time[pane_target] = datetime.now()
     set_lock(session_dir)
     log_history(session_dir, source, prompt_text, pane_target)
 

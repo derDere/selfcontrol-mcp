@@ -15,6 +15,7 @@ START_MD = REPO_DIR / "start.md"
 CLAUDE_SETTINGS = Path("~/.claude/settings.json").expanduser()
 RESET_SCRIPT = REPO_DIR / "reset_generating.py"
 NOTIFY_SCRIPT = REPO_DIR / "notify_user.py"
+PERMISSION_SCRIPT = REPO_DIR / "permission_handler.py"
 
 
 def setup_start_md() -> None:
@@ -45,8 +46,11 @@ def setup_config() -> None:
     defaults = {
         "default_prompt": "Continue working on the current task. If no task is active, review recent changes and suggest improvements.",
         "base_dir": "~/.ai-sessions",
-        "check_interval_seconds": 60,
+        "check_interval_seconds": 10,
+        "default_prompt_interval_minutes": 5,
         "generating_timeout_minutes": 30,
+        "permission_timeout_minutes": 10,
+        "permission_timeout_message": "Permission denied (timeout).",
     }
 
     if CONFIG_PATH.exists():
@@ -70,17 +74,37 @@ def setup_config() -> None:
         validate=lambda v: v.isdigit() or "Must be a number",
     ).ask()
 
+    default_prompt_interval = questionary.text(
+        "Default prompt interval (minutes, min time between default prompts):",
+        default=str(defaults["default_prompt_interval_minutes"]),
+        validate=lambda v: v.isdigit() or "Must be a number",
+    ).ask()
+
     timeout = questionary.text(
         "Generating lock timeout (minutes):",
         default=str(defaults["generating_timeout_minutes"]),
         validate=lambda v: v.isdigit() or "Must be a number",
     ).ask()
 
+    perm_timeout = questionary.text(
+        "Permission request timeout (minutes):",
+        default=str(defaults["permission_timeout_minutes"]),
+        validate=lambda v: v.isdigit() or "Must be a number",
+    ).ask()
+
+    perm_message = questionary.text(
+        "Permission timeout message:",
+        default=defaults["permission_timeout_message"],
+    ).ask()
+
     config = {
         "default_prompt": default_prompt,
         "base_dir": base_dir,
         "check_interval_seconds": int(interval),
+        "default_prompt_interval_minutes": int(default_prompt_interval),
         "generating_timeout_minutes": int(timeout),
+        "permission_timeout_minutes": int(perm_timeout),
+        "permission_timeout_message": perm_message,
     }
 
     # Preserve existing telegram config if present
@@ -181,6 +205,7 @@ def setup_hook() -> None:
     changed = False
     changed |= install_hook(settings, "Stop", str(RESET_SCRIPT.resolve()), "reset_generating.py")
     changed |= install_hook(settings, "Notification", str(NOTIFY_SCRIPT.resolve()), "notify_user.py")
+    changed |= install_hook(settings, "PermissionRequest", str(PERMISSION_SCRIPT.resolve()), "permission_handler.py")
 
     if changed:
         CLAUDE_SETTINGS.parent.mkdir(parents=True, exist_ok=True)

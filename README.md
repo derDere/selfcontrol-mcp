@@ -10,7 +10,7 @@ If the AI hasn't scheduled anything, the scheduler falls back to manually placed
 
 The user communicates with the AI through a Telegram bot. Messages sent in Telegram are delivered as prompts to the active AI session. The AI communicates back via `message_user`, which sends Telegram messages directly.
 
-A file-based generating lock prevents the scheduler from interrupting the AI mid-generation. A Claude Code `Stop` hook clears the lock when the AI finishes responding. A `Notification` hook alerts the user via Telegram when the AI needs attention (e.g. waiting for permission approval).
+A file-based generating lock prevents the scheduler from interrupting the AI mid-generation. A Claude Code `Stop` hook clears the lock when the AI finishes responding. A `Notification` hook alerts the user via Telegram when the AI needs attention. A `PermissionRequest` hook sends permission requests to Telegram with clickable allow/always/deny commands, enabling fully remote approval with a configurable timeout.
 
 ```mermaid
 flowchart LR
@@ -33,6 +33,7 @@ flowchart LR
 | `telebot_runner.py` | Telegram bot — user ↔ AI communication |
 | `reset_generating.py` | Hook script — clears the generating lock after AI finishes |
 | `notify_user.py` | Hook script — notifies user via Telegram when AI needs attention |
+| `permission_handler.py` | Hook script — remote permission approval via Telegram |
 | `setup.py` | Interactive setup wizard — configures everything |
 | `config.yaml` | Default prompt, intervals, paths, Telegram credentials (gitignored) |
 | `example.config.yaml` | Template for `config.yaml` |
@@ -99,7 +100,7 @@ The wizard will:
 - Create `start.md` from the example template (your AI's startup instructions)
 - Configure `config.yaml` with sensible defaults
 - Ask for your Telegram bot token and user ID
-- Install the `Stop` and `Notification` hooks in `~/.claude/settings.json`
+- Install the `Stop`, `Notification`, and `PermissionRequest` hooks in `~/.claude/settings.json`
 
 ### 5. Register the MCP server with Claude Code
 
@@ -186,6 +187,9 @@ The scheduler strips a leading `/` from prompts to prevent accidental Claude Cod
 | `/sessions` | Lists all sessions with clickable switch commands |
 | `/s_ENCODED` | Switch active session (e.g. `/s_work_0_1` → `work:0.1`) |
 | `/unlock` | Remove generating lock for active session (unsticks the scheduler) |
+| `/s_ENCODED_allow` | Allow a pending permission request (once) |
+| `/s_ENCODED_always` | Always allow tool for this session |
+| `/s_ENCODED_deny` | Deny a pending permission request |
 
 The bot is restricted to a single authorized user via the `telegram_user_id` in `config.yaml`.
 
@@ -212,8 +216,11 @@ default_prompt: |
   No new user input. Continue working autonomously.
   ...
 base_dir: ~/.ai-sessions
-check_interval_seconds: 60        # How often the scheduler checks for prompts
-generating_timeout_minutes: 30    # Lock timeout (safety net if hook fails)
+check_interval_seconds: 10              # How often the scheduler checks queue/input
+default_prompt_interval_minutes: 5      # Min time between default prompts (minutes)
+generating_timeout_minutes: 30          # Lock timeout (safety net if hook fails)
+permission_timeout_minutes: 10          # Permission request timeout
+permission_timeout_message: "Permission denied (timeout)."
 telegram_bot_token: "your-token"
 telegram_user_id: 123456789
 ```
