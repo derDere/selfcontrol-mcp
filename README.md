@@ -78,6 +78,8 @@ claude mcp add selfcontrol python3 /path/to/selfcontrol-mcp/server.py
 
 5. Send messages via Telegram to give the AI tasks. The AI responds via Telegram using `message_user`.
 
+**Note on slash commands:** The scheduler strips leading `/` from prompts to prevent accidental Claude Code slash command triggers (e.g. from Telegram commands). To intentionally send a slash command, use `//` (e.g. `//init` becomes `/init`).
+
 ## Telegram Bot
 
 The bot is restricted to a single authorized user. Commands:

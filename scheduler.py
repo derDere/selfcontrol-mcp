@@ -136,6 +136,12 @@ def process_session(session_dir: Path, config: dict) -> None:
             consumed_file.unlink(missing_ok=True)
         return
 
+    # Sanitize leading slashes: // → / (real command), / → stripped (accidental command)
+    if prompt_text.startswith("//"):
+        prompt_text = prompt_text[1:]
+    elif prompt_text.startswith("/"):
+        prompt_text = prompt_text[1:]
+
     log.info("Sending to %s [%s]: %.80s", pane_target, source, prompt_text.replace("\n", " "))
 
     if not send_prompt(pane_target, prompt_text):

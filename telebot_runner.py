@@ -162,7 +162,8 @@ def handle_current(message):
     log.info("[/current] user_id=%s, session=%s", message.from_user.id, session)
     if session:
         encoded = encode_session_name(session)
-        bot.reply_to(message, f"Active session: `{session}`\nSwitch command: /{encoded}", parse_mode="Markdown")
+        escaped = encoded.replace("_", "\\_")
+        bot.reply_to(message, f"Active session: `{session}`\nSwitch command: /{escaped}", parse_mode="Markdown")
     else:
         bot.reply_to(message, "No active session.")
 
@@ -181,7 +182,8 @@ def handle_sessions(message):
     lines = ["*Sessions:*\n"]
     for encoded, real_name in mapping.items():
         marker = " ← active" if real_name == current else ""
-        lines.append(f"/{encoded} → `{real_name}`{marker}")
+        escaped = encoded.replace("_", "\\_")
+        lines.append(f"/{escaped} → `{real_name}`{marker}")
 
     bot.reply_to(message, "\n".join(lines), parse_mode="Markdown")
 
