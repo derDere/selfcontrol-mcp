@@ -93,7 +93,11 @@ def get_active_session(user_id: int) -> str | None:
 # --- Auth check ---
 
 def is_authorized(message) -> bool:
-    return message.from_user.id == AUTHORIZED_USER
+    if message.from_user.id != AUTHORIZED_USER:
+        log.warning("Unauthorized access attempt — user_id=%s, username=%s",
+                     message.from_user.id, message.from_user.username)
+        return False
+    return True
 
 
 # --- File writing ---
@@ -120,6 +124,7 @@ def write_input_file(session_name: str, content: str) -> Path | None:
 def handle_start(message):
     if not is_authorized(message):
         return
+    log.info("[/start] user_id=%s", message.from_user.id)
     session = get_active_session(message.from_user.id)
     session_text = f"Active session: `{session}`" if session else "No sessions found."
     bot.reply_to(
@@ -135,10 +140,12 @@ def handle_start(message):
 def handle_help(message):
     if not is_authorized(message):
         return
+    log.info("[/help] user_id=%s", message.from_user.id)
     bot.reply_to(
         message,
         "*Commands:*\n"
         "/start — Welcome & active session\n"
+        "/current — Show current active session\n"
         "/sessions — List all sessions with switch commands\n"
         "/s\\_ENCODED — Switch to a session\n"
         "/help — This message\n\n"
@@ -147,10 +154,24 @@ def handle_help(message):
     )
 
 
+@bot.message_handler(commands=["current"])
+def handle_current(message):
+    if not is_authorized(message):
+        return
+    session = get_active_session(message.from_user.id)
+    log.info("[/current] user_id=%s, session=%s", message.from_user.id, session)
+    if session:
+        encoded = encode_session_name(session)
+        bot.reply_to(message, f"Active session: `{session}`\nSwitch command: /{encoded}", parse_mode="Markdown")
+    else:
+        bot.reply_to(message, "No active session.")
+
+
 @bot.message_handler(commands=["sessions"])
 def handle_sessions(message):
     if not is_authorized(message):
         return
+    log.info("[/sessions] user_id=%s", message.from_user.id)
     mapping = refresh_session_map()
     if not mapping:
         bot.reply_to(message, "No sessions found in ~/.ai-sessions/")
@@ -180,6 +201,7 @@ def handle_session_switch(message):
         return
 
     active_session[message.from_user.id] = real_name
+    log.info("[switch] user_id=%s, session=%s", message.from_user.id, real_name)
     bot.reply_to(message, f"Switched to session: `{real_name}`", parse_mode="Markdown")
 
 
@@ -194,8 +216,11 @@ def handle_text(message):
 
     filepath = write_input_file(session, message.text)
     if filepath:
+        log.info("[text] user_id=%s, session=%s, file=%s, msg=%.80s",
+                 message.from_user.id, session, filepath.name, message.text.replace("\n", " "))
         bot.reply_to(message, f"→ `{session}`", parse_mode="Markdown")
     else:
+        log.error("[text] Failed to write — user_id=%s, session=%s", message.from_user.id, session)
         bot.reply_to(message, f"Failed to write to session `{session}`. Is it running?", parse_mode="Markdown")
 
 
@@ -218,6 +243,7 @@ def handle_photo(message):
     caption = message.caption or "User sent a photo."
     text_path = write_input_file(session, f"{caption}\n\nPhoto saved: {photo_path}")
     if text_path:
+        log.info("[photo] user_id=%s, session=%s, file=%s", message.from_user.id, session, photo_path.name)
         bot.reply_to(message, f"→ `{session}` (photo)", parse_mode="Markdown")
 
 
@@ -241,6 +267,8 @@ def handle_document(message):
     caption = message.caption or f"User sent a file: {message.document.file_name}"
     text_path = write_input_file(session, f"{caption}\n\nFile saved: {doc_path}")
     if text_path:
+        log.info("[document] user_id=%s, session=%s, file=%s, original=%s",
+                 message.from_user.id, session, doc_path.name, message.document.file_name)
         bot.reply_to(message, f"→ `{session}` (file)", parse_mode="Markdown")
 
 
