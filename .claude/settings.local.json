@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "mcp__context7__resolve-library-id",
-      "mcp__context7__query-docs"
+      "mcp__context7__query-docs",
+      "mcp__selfcontrol__prompt_now",
+      "mcp__selfcontrol__prompt_later",
+      "WebSearch"
     ]
-  }
+  },
+  "prefersReducedMotion": false
 }
