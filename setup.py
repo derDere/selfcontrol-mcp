@@ -14,6 +14,7 @@ EXAMPLE_START = REPO_DIR / "example.start.md"
 START_MD = REPO_DIR / "start.md"
 CLAUDE_SETTINGS = Path("~/.claude/settings.json").expanduser()
 RESET_SCRIPT = REPO_DIR / "reset_generating.py"
+NOTIFY_SCRIPT = REPO_DIR / "notify_user.py"
 
 
 def setup_start_md() -> None:
@@ -144,46 +145,51 @@ def setup_telegram() -> None:
     print(f"  Telegram config saved to {CONFIG_PATH}")
 
 
+def install_hook(settings: dict, event: str, script_path: str, check_name: str) -> bool:
+    hooks = settings.setdefault("hooks", {})
+    event_hooks = hooks.setdefault(event, [])
+
+    for existing in event_hooks:
+        for h in existing.get("hooks", []):
+            if check_name in h.get("command", ""):
+                print(f"  {event} hook already installed, skipping.")
+                return False
+
+    command = f"python3 {script_path}"
+    event_hooks.append({
+        "matcher": "",
+        "hooks": [{"type": "command", "command": command}],
+    })
+    return True
+
+
 def setup_hook() -> None:
-    print("\n--- Claude Code Hook ---")
+    print("\n--- Claude Code Hooks ---")
 
     install = questionary.confirm(
-        "Install the Stop hook in ~/.claude/settings.json?",
+        "Install hooks in ~/.claude/settings.json?",
         default=True,
     ).ask()
     if not install:
         return
-
-    command = f"python3 {RESET_SCRIPT.resolve()}"
-
-    hook_entry = {
-        "matcher": "",
-        "hooks": [{"type": "command", "command": command}],
-    }
 
     settings = {}
     if CLAUDE_SETTINGS.exists():
         with open(CLAUDE_SETTINGS) as f:
             settings = json.load(f)
 
-    hooks = settings.setdefault("hooks", {})
-    stop_hooks = hooks.setdefault("Stop", [])
+    changed = False
+    changed |= install_hook(settings, "Stop", str(RESET_SCRIPT.resolve()), "reset_generating.py")
+    changed |= install_hook(settings, "Notification", str(NOTIFY_SCRIPT.resolve()), "notify_user.py")
 
-    # Check if already installed
-    for existing in stop_hooks:
-        for h in existing.get("hooks", []):
-            if "reset_generating.py" in h.get("command", ""):
-                print("  Hook already installed, skipping.")
-                return
-
-    stop_hooks.append(hook_entry)
-
-    CLAUDE_SETTINGS.parent.mkdir(parents=True, exist_ok=True)
-    with open(CLAUDE_SETTINGS, "w") as f:
-        json.dump(settings, f, indent=2)
-        f.write("\n")
-
-    print(f"  Hook installed in {CLAUDE_SETTINGS}")
+    if changed:
+        CLAUDE_SETTINGS.parent.mkdir(parents=True, exist_ok=True)
+        with open(CLAUDE_SETTINGS, "w") as f:
+            json.dump(settings, f, indent=2)
+            f.write("\n")
+        print(f"  Hooks installed in {CLAUDE_SETTINGS}")
+    else:
+        print("  All hooks already installed.")
 
 
 def main() -> None:
