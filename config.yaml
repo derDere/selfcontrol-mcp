@@ -1,5 +1,9 @@
-default_prompt: Continue working on the current task. If no task is active, review
-  recent changes and suggest improvements.
+default_prompt: |
+  No new user input. Continue working autonomously.
+  Re-read your start instructions and notes if your context has been compacted.
+  Check your task list and notes for pending work.
+  If nothing is pending, review recent changes, check for improvements, or plan ahead.
+  Do NOT wait for the user — they will reach out when they need you.
 base_dir: ~/.ai-sessions
 check_interval_seconds: 60
 generating_timeout_minutes: 30

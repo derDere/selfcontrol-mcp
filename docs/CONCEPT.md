@@ -15,10 +15,10 @@ flowchart TD
     Scheduler[Background Scheduler - scheduler.py] -->|checks every 60s| QueueDir
     Scheduler -->|fallback| InputDir
     Scheduler -->|fallback| Config[config.yaml default_prompt]
-    Scheduler -->|tmux send-keys| AI
+    Scheduler -->|tmux send-keys -l| AI
 
     Scheduler -->|sets| Lock[generating.lock]
-    Hook[Claude Code Hook Script] -->|deletes| Lock
+    Hook[Claude Code Stop Hook] -->|deletes| Lock
 
     Scheduler -->|logs| Log["~/.ai-sessions/{s}:{w}.{p}/history.log"]
 ```
@@ -28,6 +28,10 @@ flowchart TD
 ### 1. MCP Server (`server.py`)
 
 Built with **FastMCP**. Runs inside the AI's process (e.g. as a Claude Code MCP server).
+
+Tmux pane detection is **deferred** to the first tool call — not import time. This allows the server to start even outside tmux. If called outside tmux, tools return a friendly error message instead of crashing.
+
+The server raises `FileNotFoundError` on startup if `start.md` does not exist.
 
 #### Tools
 
@@ -54,19 +58,29 @@ For each session folder in `~/.ai-sessions/`:
 2. **Check queue** — Look for prompt files with a target time in the past. Pick the **oldest** one.
 3. **Fallback to input** — If no queued prompts are due, check the `input/` folder. Pick the **oldest** file.
 4. **Fallback to default** — If the input folder is also empty, use the `default_prompt` from `config.yaml`.
-5. **Send** — Deliver the prompt via `tmux send-keys -t {session}:{window}.{pane}` followed by an Enter key.
+5. **Send** — Deliver the prompt via `tmux send-keys -l` (literal mode, no interpretation) followed by a separate `Enter` key.
 6. **Set generating lock** — Write `generating.lock` with the current timestamp.
 7. **Log** — Append an entry to `history.log` (timestamp, source, prompt summary).
 8. **Clean up** — Delete the consumed prompt file (from queue or input).
 
 ### 3. Hook Script (`reset_generating.py`)
 
-A small Python script designed to be called by a **Claude Code hook** (configured by the user in their Claude Code settings). It:
+A small Python script called by a **Claude Code `Stop` hook**. It:
 
 1. Determines the current tmux session/window/pane (via `tmux display-message -p`).
 2. Deletes the corresponding `generating.lock` file in `~/.ai-sessions/{s}:{w}.{p}/`.
 
-The hook itself is **not** created by this project — only the script it calls.
+If not running inside tmux (e.g. tmux not installed, or no active session), the script **silently exits** without error.
+
+The hook can be installed automatically by `setup.py`, or manually added to `~/.claude/settings.json`.
+
+### 4. Setup Wizard (`setup.py`)
+
+An interactive setup script using **questionary** that:
+
+1. Creates `start.md` from `example.start.md` (optionally opens in `$EDITOR`)
+2. Configures `config.yaml` — prompts for each value with sensible defaults
+3. Installs the `Stop` hook in `~/.claude/settings.json` (detects existing hooks, avoids duplicates)
 
 ## Session Detection & Folder Structure
 
@@ -83,10 +97,10 @@ Each pane gets its own folder:
 ```
 ~/.ai-sessions/
 ├── 0:1.2/
-│   ├── queue/          # Timestamped prompt files (auto-deleted after use)
-│   ├── input/          # Manually placed prompt files (auto-deleted after use)
-│   ├── generating.lock # Present while AI is generating (contains timestamp)
-│   └── history.log     # Log of all sent prompts
+│   ├── queue/
+│   ├── input/
+│   ├── generating.lock
+│   └── history.log
 ├── main:0.0/
 │   ├── queue/
 │   ├── input/
@@ -126,21 +140,22 @@ The generating lock prevents the scheduler from sending a new prompt while the A
 
 **Set by:** The scheduler, immediately after sending a prompt via tmux.
 
-**Cleared by:** The hook script (`reset_generating.py`), called by a Claude Code hook when generation completes.
+**Cleared by:** The hook script (`reset_generating.py`), called by a Claude Code `Stop` hook when generation completes.
 
 **Timeout:** If the lock file is older than `generating_timeout_minutes` (default 30), the scheduler ignores it and sends anyway. This prevents a stale lock from permanently blocking a session.
 
 ## Typical Usage Flow
 
-1. Create a tmux session: `tmux new -s work`
-2. In pane 0: `cd /my/project && claude` (start Claude Code)
-3. Split pane or create new window: start `python scheduler.py`
-4. In Claude Code: use the `/start` prompt to bootstrap the session
-5. The AI works, scheduling future prompts for itself via `prompt_now` / `prompt_later`
-6. When the AI finishes generating, the hook calls `reset_generating.py`
-7. The scheduler picks up the next prompt and sends it
-8. If the AI hasn't scheduled anything, the scheduler falls back to input folder, then to the default prompt
-9. The cycle continues autonomously
+1. Run `python setup.py` to configure everything
+2. Create a tmux session: `tmux new -s work`
+3. In pane 0: `cd /my/project && claude` (start Claude Code)
+4. Split pane or create new window: start `python scheduler.py`
+5. In Claude Code: use the `/start` prompt to bootstrap the session
+6. The AI works, scheduling future prompts for itself via `prompt_now` / `prompt_later`
+7. When the AI finishes generating, the `Stop` hook calls `reset_generating.py`
+8. The scheduler picks up the next prompt and sends it
+9. If the AI hasn't scheduled anything, the scheduler falls back to input folder, then to the default prompt
+10. The cycle continues autonomously
 
 ## File Inventory
 
@@ -149,6 +164,7 @@ The generating lock prevents the scheduler from sending a new prompt while the A
 | `server.py` | FastMCP server — exposes `prompt_now`, `prompt_later` tools and `start` prompt |
 | `scheduler.py` | Background scheduler — sends prompts via tmux on a timer |
 | `reset_generating.py` | Hook script — clears the generating lock for the current pane |
+| `setup.py` | Interactive setup wizard — configures start.md, config.yaml, and hooks |
 | `config.yaml` | Configuration — default prompt, paths, intervals |
 | `start.md` | Startup prompt template (user-edited, gitignored) |
 | `example.start.md` | Example startup prompt (committed, to be copied to `start.md`) |
