@@ -7,3 +7,5 @@ default_prompt: |
 base_dir: ~/.ai-sessions
 check_interval_seconds: 60
 generating_timeout_minutes: 30
+telegram_bot_token: ""
+telegram_user_id: 0

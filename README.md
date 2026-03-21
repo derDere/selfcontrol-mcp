@@ -1,22 +1,25 @@
 # selfcontrol-mcp
 
-An MCP server that lets an AI prompt itself through tmux — enabling autonomous, continuous AI workflows.
+An MCP server that lets an AI prompt itself through tmux — enabling autonomous, continuous AI workflows with Telegram-based user communication.
 
 ## How it works
 
-The AI runs in a tmux pane and has access to two MCP tools: `prompt_now` and `prompt_later`. These write timestamped prompt files to a queue folder. A background scheduler checks the queue every minute and delivers the next due prompt back to the AI via `tmux send-keys`.
+The AI runs in a tmux pane and has access to MCP tools: `prompt_now`, `prompt_later`, and `message_user`. The first two write timestamped prompt files to a queue folder. A background scheduler checks the queue every minute and delivers the next due prompt back to the AI via `tmux send-keys`.
 
 If the AI hasn't scheduled anything, the scheduler falls back to manually placed prompts in an input folder, then to a configurable default prompt — ensuring the AI never sits idle.
 
-A file-based generating lock prevents the scheduler from interrupting the AI mid-generation. A Claude Code `Stop` hook clears the lock when the AI finishes responding.
+The user communicates with the AI through a Telegram bot. Messages sent in Telegram are delivered as prompts to the active AI session. The AI communicates back via `message_user`, which sends Telegram messages directly.
 
-The goal is a fully autonomous personal AI assistant that runs 24/7, manages its own tasks, communicates with the user via `message_user`, and persists its state to survive context compaction.
+A file-based generating lock prevents the scheduler from interrupting the AI mid-generation. A Claude Code `Stop` hook clears the lock when the AI finishes responding.
 
 ```mermaid
 flowchart LR
+    User -->|Telegram| Bot[Telegram Bot]
+    Bot -->|writes to input/| Input["Input folder"]
     AI -->|prompt_now / prompt_later| Queue["Queue folder"]
+    AI -->|message_user| User
     Scheduler -->|checks every 60s| Queue
-    Scheduler -->|fallback| Input["Input folder"]
+    Scheduler -->|fallback| Input
     Scheduler -->|fallback| Config["Default prompt"]
     Scheduler -->|tmux send-keys| AI
 ```
@@ -25,11 +28,12 @@ flowchart LR
 
 | File | Purpose |
 |------|---------|
-| `server.py` | FastMCP server — `prompt_now`, `prompt_later` tools + `start` prompt |
+| `server.py` | FastMCP server — `prompt_now`, `prompt_later`, `message_user` tools + `start` prompt |
 | `scheduler.py` | Background scheduler — delivers prompts via tmux |
+| `telebot_runner.py` | Telegram bot — user ↔ AI communication |
 | `reset_generating.py` | Hook script — clears the generating lock after AI finishes |
 | `setup.py` | Interactive setup wizard — configures everything |
-| `config.yaml` | Default prompt, intervals, paths |
+| `config.yaml` | Default prompt, intervals, paths, Telegram credentials |
 
 ## Setup
 
@@ -43,6 +47,7 @@ python setup.py
 The setup wizard will:
 - Create `start.md` from the example template
 - Configure `config.yaml` with sensible defaults
+- Set up Telegram bot token and user ID
 - Install the `Stop` hook in `~/.claude/settings.json`
 
 Then add the MCP server to Claude Code:
@@ -60,16 +65,30 @@ claude mcp add selfcontrol python3 /path/to/selfcontrol-mcp/server.py
    claude  # or any AI that supports MCP
    ```
 
-2. In a separate tmux pane, start the scheduler:
+2. In separate tmux panes, start the scheduler and Telegram bot:
    ```bash
    python /path/to/selfcontrol-mcp/scheduler.py
+   python /path/to/selfcontrol-mcp/telebot_runner.py
    ```
 
 3. In the AI, use the `/start` prompt to kick off the autonomous loop.
 
 4. The AI schedules follow-up prompts for itself. The scheduler delivers them. The cycle continues.
 
-If the AI is not running inside tmux, the MCP tools will return a friendly error message instead of crashing.
+5. Send messages via Telegram to give the AI tasks. The AI responds via Telegram using `message_user`.
+
+## Telegram Bot
+
+The bot is restricted to a single authorized user. Commands:
+
+| Command | Description |
+|---------|-------------|
+| `/start` | Welcome message, shows active session |
+| `/sessions` | Lists all sessions with clickable switch commands |
+| `/s_ENCODED` | Switch active session (e.g. `/s_work_0_1` → `work:0.1`) |
+| `/help` | Shows available commands |
+
+Session names are encoded for Telegram compatibility: `work:0.1` becomes `/s_work_0_1`.
 
 ## Session isolation
 

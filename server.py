@@ -6,6 +6,8 @@ import subprocess
 from pathlib import Path
 from datetime import datetime, timedelta
 
+import yaml
+import telebot
 from fastmcp import FastMCP
 
 REPO_DIR = Path(__file__).parent
@@ -19,6 +21,16 @@ if not START_MD.exists():
     )
 
 BASE_DIR = Path("~/.ai-sessions").expanduser()
+CONFIG_PATH = REPO_DIR / "config.yaml"
+
+
+def load_config() -> dict:
+    with open(CONFIG_PATH) as f:
+        return yaml.safe_load(f) or {}
+
+
+def encode_session_name(name: str) -> str:
+    return "s_" + name.replace(":", "_").replace(".", "_")
 
 
 class NotInTmuxError(Exception):
@@ -128,6 +140,53 @@ def prompt_later(message: str, target_time: str | None = None, delay: str | None
     timestamp_str = dt.strftime("%Y%m%dT%H%M%S")
     filename = write_prompt_file(session_dir / "queue", timestamp_str, message)
     return f"Scheduled prompt for {dt.isoformat()}: {filename}"
+
+
+@mcp.tool
+def message_user(message: str, file_path: str | None = None) -> str:
+    """Send a message to the user via Telegram. Use this for all communication — the user is NOT watching terminal output.
+
+    Args:
+        message: The message text to send.
+        file_path: Optional absolute path to a file or image to send along with the message.
+    """
+    config = load_config()
+    token = config.get("telegram_bot_token")
+    user_id = config.get("telegram_user_id")
+
+    if not token or not user_id:
+        return "Error: Telegram not configured. Run setup.py to set bot token and user ID."
+
+    # Build session prefix
+    prefix = ""
+    try:
+        pane_id = get_tmux_pane() if _pane_id is None else _pane_id
+        encoded = encode_session_name(pane_id)
+        prefix = f"/{encoded}  {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+    except (NotInTmuxError, Exception):
+        pass
+
+    full_message = prefix + message
+
+    try:
+        bot = telebot.TeleBot(token)
+
+        if file_path:
+            p = Path(file_path)
+            if not p.exists():
+                return f"Error: File not found: {file_path}"
+            ext = p.suffix.lower()
+            with open(p, "rb") as f:
+                if ext in (".jpg", ".jpeg", ".png", ".gif", ".webp"):
+                    bot.send_photo(user_id, f, caption=full_message)
+                else:
+                    bot.send_document(user_id, f, caption=full_message)
+        else:
+            bot.send_message(user_id, full_message)
+
+        return "Message sent to user."
+    except Exception as e:
+        return f"Error sending message: {e}"
 
 
 @mcp.prompt
