@@ -36,62 +36,157 @@ flowchart LR
 | `config.yaml` | Default prompt, intervals, paths, Telegram credentials (gitignored) |
 | `example.config.yaml` | Template for `config.yaml` |
 
-## Setup
+## Prerequisites
+
+- **Python 3.10+**
+- **tmux** — terminal multiplexer (the AI runs inside tmux panes)
+- **Claude Code** — Anthropic's CLI (`claude`)
+- **Telegram account** — for the communication bot
+
+### Installing tmux
 
 ```bash
+# Ubuntu/Debian
+sudo apt install tmux
+
+# macOS
+brew install tmux
+
+# Arch
+sudo pacman -S tmux
+```
+
+### Installing Claude Code
+
+Follow the official instructions at [claude.ai/code](https://claude.ai/code) or:
+
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+## Setup
+
+### 1. Clone and install dependencies
+
+```bash
+git clone https://github.com/YOUR_USER/selfcontrol-mcp.git
+cd selfcontrol-mcp
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+```
+
+### 2. Create a Telegram bot
+
+1. Open Telegram and search for [@BotFather](https://t.me/BotFather)
+2. Send `/newbot` and follow the instructions to create a new bot
+3. Copy the **bot token** (looks like `123456:ABC-DEF...`)
+
+### 3. Find your Telegram user ID
+
+1. Open Telegram and search for [@userinfobot](https://t.me/userinfobot) or [@RawDataBot](https://t.me/RawDataBot)
+2. Send `/start` to the bot
+3. Copy your **user ID** (a number like `123456789`)
+
+### 4. Run the setup wizard
+
+```bash
 python setup.py
 ```
 
-The setup wizard will:
-- Create `start.md` from the example template
+The wizard will:
+- Create `start.md` from the example template (your AI's startup instructions)
 - Configure `config.yaml` with sensible defaults
-- Set up Telegram bot token and user ID
+- Ask for your Telegram bot token and user ID
 - Install the `Stop` hook in `~/.claude/settings.json`
 
-Then add the MCP server to Claude Code:
+### 5. Register the MCP server with Claude Code
 
 ```bash
-claude mcp add selfcontrol python3 /path/to/selfcontrol-mcp/server.py
+claude mcp add selfcontrol python3 /absolute/path/to/selfcontrol-mcp/server.py
+```
+
+### 6. (Optional) Set bot commands in Telegram
+
+Send `/setcommands` to [@BotFather](https://t.me/BotFather) and paste:
+
+```
+start - Welcome message and active session
+help - Show all available commands
+current - Show current active session
+sessions - List all sessions with switch commands
+unlock - Remove generating lock for active session
 ```
 
 ## Usage
 
-1. Start a tmux session and open your project:
-   ```bash
-   tmux new -s work
-   cd /your/project
-   claude  # or any AI that supports MCP
-   ```
+### Starting everything
 
-2. In separate tmux panes, start the scheduler and Telegram bot:
-   ```bash
-   python /path/to/selfcontrol-mcp/scheduler.py
-   python /path/to/selfcontrol-mcp/telebot_runner.py
-   ```
+tmux lets you run multiple processes in named windows within a single terminal. Here's how to set everything up:
 
-3. In the AI, use the `/start` prompt to kick off the autonomous loop.
+```bash
+# Create a new tmux session
+tmux new -s work
 
-4. The AI schedules follow-up prompts for itself. The scheduler delivers them. The cycle continues.
+# In the first pane: start the scheduler
+python /path/to/selfcontrol-mcp/scheduler.py
 
-5. Send messages via Telegram to give the AI tasks. The AI responds via Telegram using `message_user`.
+# Split the pane (Ctrl+B, then %) and start the Telegram bot
+python /path/to/selfcontrol-mcp/telebot_runner.py
 
-**Note on slash commands:** The scheduler strips leading `/` from prompts to prevent accidental Claude Code slash command triggers (e.g. from Telegram commands). To intentionally send a slash command, use `//` (e.g. `//init` becomes `/init`).
+# Create a new window (Ctrl+B, then C) for your AI session
+cd /your/project
+claude
+```
 
-## Telegram Bot
+**Quick tmux reference:**
+| Key | Action |
+|-----|--------|
+| `Ctrl+B, %` | Split pane vertically |
+| `Ctrl+B, "` | Split pane horizontally |
+| `Ctrl+B, C` | Create new window |
+| `Ctrl+B, N` | Next window |
+| `Ctrl+B, P` | Previous window |
+| `Ctrl+B, D` | Detach (session keeps running in background) |
+| `tmux attach -t work` | Reattach to a detached session |
 
-The bot is restricted to a single authorized user. Commands:
+### Kickoff
+
+Once Claude Code is running in a tmux pane, use the `/start` MCP prompt to bootstrap the autonomous loop. The AI will:
+
+1. Save its instructions to a file (to survive context compaction)
+2. Start working on tasks
+3. Schedule follow-up prompts for itself
+4. Communicate with you via Telegram
+
+### Talking to the AI
+
+Send messages in the Telegram bot chat. They are delivered as prompts to the active AI session. The AI responds via Telegram using `message_user`.
+
+### Managing multiple sessions
+
+You can run multiple AI sessions in different tmux panes. Each gets its own folder under `~/.ai-sessions/`. Use the Telegram bot to switch between them:
+
+- `/sessions` — lists all sessions with clickable switch commands
+- `/s_work_0_1` — switch to session `work:0.1`
+- `/current` — show which session is active
+
+### Slash command handling
+
+The scheduler strips a leading `/` from prompts to prevent accidental Claude Code slash command triggers (e.g. if a Telegram command accidentally lands as input). To intentionally send a slash command to Claude Code, use `//` (e.g. `//init` becomes `/init`).
+
+## Telegram Bot Commands
 
 | Command | Description |
 |---------|-------------|
 | `/start` | Welcome message, shows active session |
+| `/help` | Shows all available commands |
+| `/current` | Shows current active session with switch command |
 | `/sessions` | Lists all sessions with clickable switch commands |
 | `/s_ENCODED` | Switch active session (e.g. `/s_work_0_1` → `work:0.1`) |
-| `/help` | Shows available commands |
+| `/unlock` | Remove generating lock for active session (unsticks the scheduler) |
 
-Session names are encoded for Telegram compatibility: `work:0.1` becomes `/s_work_0_1`.
+The bot is restricted to a single authorized user via the `telegram_user_id` in `config.yaml`.
 
 ## Session isolation
 
@@ -106,6 +201,23 @@ Each tmux pane gets its own folder under `~/.ai-sessions/`:
 ```
 
 Multiple AI sessions can run in parallel without interference.
+
+## Configuration
+
+`config.yaml` (created by `setup.py`, gitignored):
+
+```yaml
+default_prompt: |
+  No new user input. Continue working autonomously.
+  ...
+base_dir: ~/.ai-sessions
+check_interval_seconds: 60        # How often the scheduler checks for prompts
+generating_timeout_minutes: 30    # Lock timeout (safety net if hook fails)
+telegram_bot_token: "your-token"
+telegram_user_id: 123456789
+```
+
+See `example.config.yaml` for the template.
 
 ## License
 
