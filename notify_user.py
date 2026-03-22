@@ -39,6 +39,10 @@ def main() -> None:
         except (json.JSONDecodeError, Exception):
             pass
 
+    # Skip if this is a permission-related notification (handled by permission_handler.py)
+    if "permission" in detail.lower():
+        return
+
     message = f"/{encoded}  Needs attention\n\n"
     if detail:
         message += detail

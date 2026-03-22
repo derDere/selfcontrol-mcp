@@ -190,53 +190,40 @@ def handle_sessions(message):
     bot.reply_to(message, "\n".join(lines), parse_mode="Markdown")
 
 
-def write_permission_response(session_name: str, decision: str) -> bool:
+import re
+
+_PERM_RE = re.compile(r"^s_(.+)_(allow|always|deny)_([a-z0-9]+)$")
+
+
+def write_permission_response(session_name: str, decision: str, req_id: str) -> bool:
     resp_path = BASE_DIR / session_name / "permission_response"
     try:
-        resp_path.write_text(decision)
+        resp_path.write_text(f"{decision}:{req_id}")
         return True
     except OSError:
         return False
 
 
-@bot.message_handler(func=lambda m: m.text and m.text.endswith("_allow") and m.text.startswith("/s_"))
-def handle_permission_allow(message):
+@bot.message_handler(func=lambda m: m.text and m.text.startswith("/s_") and _PERM_RE.search(m.text.strip().split()[0].lstrip("/")))
+def handle_permission_response(message):
     if not is_authorized(message):
         return
     cmd = message.text.strip().split()[0].lstrip("/")
-    session_cmd = cmd.removesuffix("_allow")
-    real_name = decode_session_command(session_cmd)
-    if real_name and write_permission_response(real_name, "allow"):
-        log.info("[permission] allow — user_id=%s, session=%s", message.from_user.id, real_name)
-        bot.reply_to(message, f"Allowed (once) for `{real_name}`", parse_mode="Markdown")
-    else:
-        bot.reply_to(message, "Unknown session or write failed.")
-
-
-@bot.message_handler(func=lambda m: m.text and m.text.endswith("_always") and m.text.startswith("/s_"))
-def handle_permission_always(message):
-    if not is_authorized(message):
+    match = _PERM_RE.match(cmd)
+    if not match:
+        bot.reply_to(message, "Invalid permission command format.")
         return
-    cmd = message.text.strip().split()[0].lstrip("/")
-    session_cmd = cmd.removesuffix("_always")
-    real_name = decode_session_command(session_cmd)
-    if real_name and write_permission_response(real_name, "always"):
-        log.info("[permission] always — user_id=%s, session=%s", message.from_user.id, real_name)
-        bot.reply_to(message, f"Always allowed for `{real_name}`", parse_mode="Markdown")
-    else:
-        bot.reply_to(message, "Unknown session or write failed.")
 
-
-@bot.message_handler(func=lambda m: m.text and m.text.endswith("_deny") and m.text.startswith("/s_"))
-def handle_permission_deny(message):
-    if not is_authorized(message):
-        return
-    cmd = message.text.strip().split()[0].lstrip("/")
-    session_cmd = cmd.removesuffix("_deny")
+    session_part, decision, req_id = match.groups()
+    session_cmd = f"s_{session_part}"
     real_name = decode_session_command(session_cmd)
-    if real_name and write_permission_response(real_name, "deny"):
-        log.info("[permission] deny — user_id=%s, session=%s", message.from_user.id, real_name)
-        bot.reply_to(message, f"Denied for `{real_name}`", parse_mode="Markdown")
+    if not real_name:
+        refresh_session_map()
+        real_name = decode_session_command(session_cmd)
+    if real_name and write_permission_response(real_name, decision, req_id):
+        labels = {"allow": "Allowed (once)", "always": "Always allowed", "deny": "Denied"}
+        log.info("[permission] %s — user_id=%s, session=%s, req_id=%s", decision, message.from_user.id, real_name, req_id)
+        bot.reply_to(message, f"{labels[decision]} for `{real_name}` (req: {req_id})", parse_mode="Markdown")
     else:
         bot.reply_to(message, "Unknown session or write failed.")
 
