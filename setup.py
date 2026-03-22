@@ -52,7 +52,6 @@ def setup_config() -> None:
         "generating_timeout_minutes": 30,
         "permission_timeout_minutes": 10,
         "permission_timeout_message": "Permission denied (timeout).",
-        "rate_limit_wait_minutes": 30,
     }
 
     if CONFIG_PATH.exists():
@@ -97,12 +96,6 @@ def setup_config() -> None:
     perm_message = questionary.text(
         "Permission timeout message:",
         default=defaults["permission_timeout_message"],
-    ).ask()
-
-    rate_limit_wait = questionary.text(
-        "Rate limit default wait (minutes, used when reset time can't be parsed):",
-        default=str(defaults["rate_limit_wait_minutes"]),
-        validate=lambda v: v.isdigit() or "Must be a number",
     ).ask()
 
     config = {

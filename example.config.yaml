@@ -10,6 +10,5 @@ default_prompt_interval_minutes: 5
 generating_timeout_minutes: 30
 permission_timeout_minutes: 10
 permission_timeout_message: "Permission denied — the user did not respond in time. Avoid tools that require approval. Stick to the allowed tools you have noted down. The user may not be available to monitor permission requests right now."
-rate_limit_wait_minutes: 30
 telegram_bot_token: ""
 telegram_user_id: 0

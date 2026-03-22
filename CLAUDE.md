@@ -47,11 +47,11 @@ Eight Python scripts:
    - Returns JSON `{"decision": "allow"|"always"|"deny"}` to Claude Code
 
 7. **Rate Limit Handler** (`rate_limit_handler.py`) — Called by Claude Code `StopFailure` hook (matcher: `rate_limit`):
-   - Writes `~/.ai-sessions/rate_limit.json` with detected timestamp and parsed reset time
-   - Tries to parse reset time from tmux pane content (e.g. "resets at 3pm")
-   - Falls back to configurable `rate_limit_wait_minutes` (default 30min)
-   - Sends Telegram notification with reset time and wait duration
-   - Scheduler reads this file and pauses all sessions until reset
+   - Writes `~/.ai-sessions/rate_limit.json` as a marker to pause the scheduler
+   - Waits 1 second then sends Enter via tmux to dismiss the rate limit dialog
+   - Sends Telegram notification with `/unlimit` command to resume
+   - Scheduler skips all sessions while `rate_limit.json` exists
+   - User removes the file manually via `/unlimit` in Telegram when ready
 
 8. **Setup Wizard** (`setup.py`) — Interactive questionary-based setup that:
    - Creates `start.md` from `example.start.md`

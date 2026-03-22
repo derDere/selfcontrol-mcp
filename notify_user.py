@@ -40,7 +40,8 @@ def main() -> None:
             pass
 
     # Skip if this is a permission-related notification (handled by permission_handler.py)
-    if "permission" in detail.lower():
+    detail_lower = detail.lower()
+    if any(word in detail_lower for word in ("permission", "approval", "approve", "waiting")):
         return
 
     message = f"/{encoded}  Needs attention\n\n"

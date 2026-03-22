@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
-"""StopFailure hook — detects rate limits, writes a shared wait file, and notifies via Telegram.
+"""StopFailure hook — detects rate limits, pauses the scheduler, and dismisses the dialog.
 
 This hook fires when Claude Code's turn ends due to an API error.
 Matcher: rate_limit
 
-It writes ~/.ai-sessions/rate_limit.json so the scheduler knows to pause all sessions.
-The reset time is parsed from the tmux pane content if possible, otherwise falls back
-to a configurable default wait.
+It writes ~/.ai-sessions/rate_limit.json so the scheduler stops sending prompts.
+The user removes this file manually via /unlimit in Telegram.
+After writing the file, it waits 1 second and sends Enter to dismiss the rate limit dialog.
 """
 
 import json
 import logging
-import re
 import subprocess
 import sys
-from datetime import datetime, timedelta
+import time
+from datetime import datetime
 from pathlib import Path
 
 import telebot
 import yaml
 
-from session_mapper import encode_session_name, get_pane_id
+from session_mapper import encode_session_name, escape_for_markdown, get_pane_id
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,64 +32,6 @@ log = logging.getLogger("rate_limit_handler")
 
 SCRIPT_DIR = Path(__file__).parent
 CONFIG_PATH = SCRIPT_DIR / "config.yaml"
-
-# Patterns to find reset time in tmux pane output (from claude-auto-retry and similar tools)
-_RESET_PATTERNS = [
-    re.compile(r"resets?\s+(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm))", re.IGNORECASE),
-    re.compile(r"try again in\s+(\d+)\s+(hour|minute|min)", re.IGNORECASE),
-    re.compile(r"resets?\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm))\s*\(([^)]+)\)", re.IGNORECASE),
-]
-
-
-def parse_reset_time_from_text(text: str) -> datetime | None:
-    """Try to extract a reset time from rate limit text shown in tmux."""
-    for pattern in _RESET_PATTERNS:
-        match = pattern.search(text)
-        if not match:
-            continue
-
-        groups = match.groups()
-
-        # "try again in N hours/minutes"
-        if len(groups) == 2 and groups[1].lower().startswith(("hour", "minute", "min")):
-            amount = int(groups[0])
-            if groups[1].lower().startswith("hour"):
-                return datetime.now() + timedelta(hours=amount)
-            else:
-                return datetime.now() + timedelta(minutes=amount)
-
-        # "resets at 3pm" or "resets 3:30pm"
-        time_str = groups[0].strip()
-        try:
-            # Try "3pm" or "3:30pm"
-            for fmt in ("%I:%M%p", "%I%p", "%I:%M %p", "%I %p"):
-                try:
-                    parsed = datetime.strptime(time_str.upper(), fmt)
-                    now = datetime.now()
-                    reset = now.replace(hour=parsed.hour, minute=parsed.minute, second=0, microsecond=0)
-                    if reset <= now:
-                        reset += timedelta(days=1)
-                    return reset
-                except ValueError:
-                    continue
-        except Exception:
-            continue
-
-    return None
-
-
-def capture_tmux_pane() -> str:
-    """Capture the current tmux pane content to look for reset time info."""
-    try:
-        result = subprocess.run(
-            ["tmux", "capture-pane", "-p", "-S", "-30"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if result.returncode == 0:
-            return result.stdout
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-    return ""
 
 
 def main() -> None:
@@ -112,56 +54,54 @@ def main() -> None:
         config = yaml.safe_load(f) or {}
 
     base_dir = Path(config.get("base_dir", "~/.ai-sessions")).expanduser()
-    default_wait = config.get("rate_limit_wait_minutes", 30)
-
     pane_id = get_pane_id()
 
-    # Try to parse reset time from tmux pane content
-    pane_text = capture_tmux_pane()
-    reset_time = parse_reset_time_from_text(pane_text)
-
-    if reset_time is None:
-        # Also try parsing from error_details
-        reset_time = parse_reset_time_from_text(error_details)
-
-    if reset_time is None:
-        reset_time = datetime.now() + timedelta(minutes=default_wait)
-        log.info("Could not parse reset time, using default wait of %d minutes", default_wait)
-    else:
-        log.info("Parsed reset time: %s", reset_time.isoformat())
-
-    # Write rate limit file next to all sessions (not inside a session)
+    # Write rate limit marker file
     rate_limit_path = base_dir / "rate_limit.json"
     base_dir.mkdir(parents=True, exist_ok=True)
-    rate_limit_data = {
-        "detected_at": datetime.now().isoformat(),
-        "reset_time": reset_time.isoformat(),
-        "error": error,
-        "error_details": error_details,
-        "session": pane_id,
-    }
-    rate_limit_path.write_text(json.dumps(rate_limit_data, indent=2) + "\n")
-    log.info("Wrote rate limit file: %s", rate_limit_path)
-
-    # Send Telegram notification
+    # Send Telegram notification first to get message ID
+    msg_id = None
     token = config.get("telegram_bot_token")
     user_id = config.get("telegram_user_id")
     if token and user_id:
         encoded = encode_session_name(pane_id)
-        wait_minutes = int((reset_time - datetime.now()).total_seconds() / 60)
+        escaped = escape_for_markdown(encoded)
         message = (
-            f"/{encoded}  Rate limit reached\n\n"
+            f"\U0001f534 /{escaped}  Rate limit reached\n\n"
             f"Session: `{pane_id}`\n"
-            f"Reset: {reset_time.strftime('%H:%M')} ({wait_minutes} min)\n"
             f"Error: {error_details or error}\n\n"
-            f"Scheduler will pause and resume automatically."
+            f"Scheduler paused. Use /unlimit to resume."
         )
         try:
             bot = telebot.TeleBot(token)
-            bot.send_message(user_id, message, parse_mode="Markdown")
-            log.info("Telegram notification sent")
+            sent = bot.send_message(user_id, message, parse_mode="Markdown")
+            msg_id = sent.message_id
+            log.info("Telegram notification sent (msg_id: %s)", msg_id)
         except Exception as e:
             log.error("Failed to send Telegram message: %s", e)
+
+    # Write rate limit marker file (includes Telegram msg_id for editing on unlimit)
+    rate_limit_data = {
+        "detected_at": datetime.now().isoformat(),
+        "error": error,
+        "error_details": error_details,
+        "session": pane_id,
+    }
+    if msg_id:
+        rate_limit_data["telegram_msg_id"] = msg_id
+    rate_limit_path.write_text(json.dumps(rate_limit_data, indent=2) + "\n")
+    log.info("Wrote rate limit file: %s", rate_limit_path)
+
+    # Wait 1 second then send Enter to dismiss the rate limit dialog
+    time.sleep(1)
+    try:
+        subprocess.run(
+            ["tmux", "send-keys", "-t", pane_id, "Enter"],
+            check=True, capture_output=True, text=True, timeout=5,
+        )
+        log.info("Sent Enter to %s to dismiss rate limit dialog", pane_id)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
+        log.error("Failed to send Enter to %s: %s", pane_id, e)
 
 
 if __name__ == "__main__":

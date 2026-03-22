@@ -132,6 +132,7 @@ def handle_help(message):
         "/sessions — List all sessions with switch commands\n"
         "/s\\_ENCODED — Switch to a session\n"
         "/unlock — Remove generating lock for active session\n"
+        "/unlimit — Remove rate limit pause and resume scheduler\n"
         "/help — This message\n\n"
         "Any text message is sent to the active session as a prompt.",
         parse_mode="Markdown",
@@ -168,6 +169,40 @@ def handle_unlock(message):
     else:
         log.info("[/unlock] user_id=%s, session=%s — no lock found", message.from_user.id, session)
         bot.reply_to(message, f"No lock found for `{session}`", parse_mode="Markdown")
+
+
+@bot.message_handler(commands=["unlimit"])
+def handle_unlimit(message):
+    if not is_authorized(message):
+        return
+    rate_limit_path = BASE_DIR / "rate_limit.json"
+    if rate_limit_path.exists():
+        # Read data to get Telegram message ID for editing
+        try:
+            import json
+            data = json.loads(rate_limit_path.read_text())
+            msg_id = data.get("telegram_msg_id")
+            session = data.get("session", "unknown")
+            error_details = data.get("error_details") or data.get("error", "")
+            if msg_id:
+                edited = (
+                    f"\U0001f7e2 Rate limit lifted\n\n"
+                    f"Session: `{session}`\n"
+                    f"Error: {error_details}\n\n"
+                    f"Resumed by /unlimit"
+                )
+                try:
+                    bot.edit_message_text(edited, chat_id=message.chat.id, message_id=msg_id, parse_mode="Markdown")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        rate_limit_path.unlink()
+        log.info("[/unlimit] user_id=%s — rate limit file removed", message.from_user.id)
+        bot.reply_to(message, "Rate limit removed. Scheduler will resume.")
+    else:
+        log.info("[/unlimit] user_id=%s — no rate limit file found", message.from_user.id)
+        bot.reply_to(message, "No rate limit active.")
 
 
 @bot.message_handler(commands=["sessions"])
