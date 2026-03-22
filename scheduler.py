@@ -47,7 +47,8 @@ def is_lock_stale(lock_path: Path, timeout_minutes: int) -> bool:
         return True
 
 
-def get_due_queue_file(queue_dir: Path) -> Path | None:
+def get_due_queue_files(queue_dir: Path) -> list[Path]:
+    """Return all queue files that are due, sorted chronologically."""
     now = datetime.now()
     candidates = []
     for f in queue_dir.iterdir():
@@ -56,18 +57,15 @@ def get_due_queue_file(queue_dir: Path) -> Path | None:
         ts = parse_queue_timestamp(f.name)
         if ts is not None and ts <= now:
             candidates.append((f.name, f))
-    if not candidates:
-        return None
     candidates.sort(key=lambda x: x[0])
-    return candidates[0][1]
+    return [f for _, f in candidates]
 
 
-def get_oldest_input_file(input_dir: Path) -> Path | None:
+def get_all_input_files(input_dir: Path) -> list[Path]:
+    """Return all input files, sorted by modification time (oldest first)."""
     files = [f for f in input_dir.iterdir() if f.is_file()]
-    if not files:
-        return None
     files.sort(key=lambda f: f.stat().st_mtime)
-    return files[0]
+    return files
 
 
 def send_prompt(pane_target: str, prompt_text: str) -> bool:
@@ -99,6 +97,15 @@ def log_history(session_dir: Path, source: str, prompt_text: str, pane_target: s
         f.write(entry)
 
 
+def sanitize_prompt(text: str) -> str:
+    """Sanitize leading slashes: // → / (real command), / → stripped (accidental command)."""
+    if text.startswith("//"):
+        return text[1:]
+    elif text.startswith("/"):
+        return text[1:]
+    return text
+
+
 def process_session(session_dir: Path, config: dict) -> None:
     pane_target = session_dir.name
     timeout_minutes = config.get("generating_timeout_minutes", 30)
@@ -111,25 +118,30 @@ def process_session(session_dir: Path, config: dict) -> None:
     queue_dir = session_dir / "queue"
     input_dir = session_dir / "input"
 
-    prompt_text = None
-    source = None
-    consumed_file = None
+    utc_now = datetime.utcnow().strftime("%Y-%m-%d %H:%M utc")
+    parts: list[str] = []
+    consumed_files: list[Path] = []
 
+    # Collect all due AI prompts (chronological)
     if queue_dir.is_dir():
-        due_file = get_due_queue_file(queue_dir)
-        if due_file:
-            prompt_text = due_file.read_text()
-            source = "queue"
-            consumed_file = due_file
+        for f in get_due_queue_files(queue_dir):
+            text = f.read_text().strip()
+            if text:
+                text = sanitize_prompt(text)
+                parts.append(f"[{utc_now}] AI: {text}")
+                consumed_files.append(f)
 
-    if prompt_text is None and input_dir.is_dir():
-        input_file = get_oldest_input_file(input_dir)
-        if input_file:
-            prompt_text = input_file.read_text()
-            source = "input"
-            consumed_file = input_file
+    # Collect all user input prompts (chronological)
+    if input_dir.is_dir():
+        for f in get_all_input_files(input_dir):
+            text = f.read_text().strip()
+            if text:
+                text = sanitize_prompt(text)
+                parts.append(f"[{utc_now}] User: {text}")
+                consumed_files.append(f)
 
-    if prompt_text is None:
+    # If nothing due, fall back to default prompt after configured interval
+    if not parts:
         default_interval = config.get("default_prompt_interval_minutes", 5)
         last_time = _last_prompt_time.get(pane_target)
         if last_time is not None:
@@ -138,29 +150,13 @@ def process_session(session_dir: Path, config: dict) -> None:
                 log.debug("Skipping default for %s — last prompt %.1f min ago (interval: %d min)",
                           pane_target, elapsed, default_interval)
                 return
-        prompt_text = config.get("default_prompt", "Continue.")
+        default_text = config.get("default_prompt", "Continue.")
+        parts.append(f"[{utc_now}] {default_text}")
         source = "default"
+    else:
+        source = f"bundled({len(parts)})"
 
-    if not prompt_text.strip():
-        log.warning("Empty prompt for %s from %s, skipping", pane_target, source)
-        if consumed_file:
-            consumed_file.unlink(missing_ok=True)
-        return
-
-    # Sanitize leading slashes: // → / (real command), / → stripped (accidental command)
-    if prompt_text.startswith("//"):
-        prompt_text = prompt_text[1:]
-    elif prompt_text.startswith("/"):
-        prompt_text = prompt_text[1:]
-
-    # Prefix prompts with timestamp and source label
-    utc_now = datetime.utcnow().strftime("%Y-%m-%d %H:%M utc")
-    if source == "input":
-        prompt_text = f"[{utc_now}] User: {prompt_text}"
-    elif source == "queue":
-        prompt_text = f"[{utc_now}] AI: {prompt_text}"
-    elif source == "default":
-        prompt_text = f"[{utc_now}] {prompt_text}"
+    prompt_text = "\n\n---\n\n".join(parts)
 
     log.info("Sending to %s [%s]: %.80s", pane_target, source, prompt_text.replace("\n", " "))
 
@@ -171,8 +167,8 @@ def process_session(session_dir: Path, config: dict) -> None:
     set_lock(session_dir)
     log_history(session_dir, source, prompt_text, pane_target)
 
-    if consumed_file:
-        consumed_file.unlink(missing_ok=True)
+    for f in consumed_files:
+        f.unlink(missing_ok=True)
 
 
 def is_rate_limited(base_dir: Path) -> bool:
