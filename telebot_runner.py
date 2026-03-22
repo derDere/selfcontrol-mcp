@@ -196,9 +196,11 @@ _PERM_RE = re.compile(r"^s_(.+)_(allow|always|deny)_([a-z0-9]+)$")
 
 
 def write_permission_response(session_name: str, decision: str, req_id: str) -> bool:
-    resp_path = BASE_DIR / session_name / "permission_response"
+    perm_dir = BASE_DIR / session_name / "permissions"
+    perm_dir.mkdir(parents=True, exist_ok=True)
+    resp_path = perm_dir / req_id
     try:
-        resp_path.write_text(f"{decision}:{req_id}")
+        resp_path.write_text(decision)
         return True
     except OSError:
         return False

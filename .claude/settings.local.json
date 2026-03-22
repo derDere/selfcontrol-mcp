@@ -1,13 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "mcp__context7__resolve-library-id",
-      "mcp__context7__query-docs",
-      "mcp__selfcontrol__prompt_now",
-      "mcp__selfcontrol__prompt_later",
-      "WebSearch",
-      "mcp__selfcontrol__message_user"
+      "mcp__context7",
+      "mcp__selfcontrol",
+      "WebSearch"
     ]
-  },
-  "prefersReducedMotion": false
+  }
 }

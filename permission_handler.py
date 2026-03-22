@@ -38,15 +38,22 @@ def random_id(length: int = 4) -> str:
     return "".join(random.choices(string.ascii_lowercase + string.digits, k=length))
 
 
-def respond(decision: str) -> None:
+def respond(decision: str, message: str = "", suggestions: list | None = None) -> None:
     """Print the decision JSON to stdout and exit."""
     log.info("Responding: %s", decision)
+    behavior = "allow" if decision == "always" else decision
+    decision_obj = {"behavior": behavior}
+    if message and decision == "deny":
+        decision_obj["message"] = message
+    if decision == "always" and suggestions:
+        # Pass through permission_suggestions so Claude Code persists the rule
+        allow_suggestions = [s for s in suggestions if s.get("behavior") == "allow"]
+        if allow_suggestions:
+            decision_obj["updatedPermissions"] = allow_suggestions
     output = {
         "hookSpecificOutput": {
             "hookEventName": "PermissionRequest",
-            "decision": {
-                "behavior": decision,
-            },
+            "decision": decision_obj,
         }
     }
     print(json.dumps(output), flush=True)
@@ -88,11 +95,10 @@ def main() -> None:
     req_id = random_id()
     log.info("Permission request %s for tool=%s in session=%s", req_id, tool_name, pane_id)
 
-    # Clean up any stale response file
-    resp_path = base_dir / pane_id / "permission_response"
-    resp_path.parent.mkdir(parents=True, exist_ok=True)
-    if resp_path.exists():
-        resp_path.unlink()
+    # Response file unique to this request
+    perm_dir = base_dir / pane_id / "permissions"
+    perm_dir.mkdir(parents=True, exist_ok=True)
+    resp_path = perm_dir / req_id
 
     # Format tool input for display
     input_preview = json.dumps(tool_input, indent=2, ensure_ascii=False)
@@ -118,46 +124,55 @@ def main() -> None:
 
     try:
         bot = telebot.TeleBot(token)
-        bot.send_message(user_id, message, parse_mode="Markdown")
-        log.info("Permission request sent to Telegram")
+        sent = bot.send_message(user_id, message, parse_mode="Markdown")
+        msg_id = sent.message_id
+        log.info("Permission request sent to Telegram (msg_id: %s)", msg_id)
     except Exception as e:
         log.error("Failed to send Telegram message: %s", e)
         return
 
-    # Poll for response (file content must match our request ID)
-    log.info("Polling for response at %s (timeout: %d min, id: %s)", resp_path, timeout_minutes, req_id)
+    # Poll for response file (filename IS the request ID, content is the decision)
+    log.info("Polling for response at %s (timeout: %d min)", resp_path, timeout_minutes)
     deadline = time.time() + (timeout_minutes * 60)
     while time.time() < deadline:
         if resp_path.exists():
             try:
-                content = resp_path.read_text().strip()
-                # Expected format: "allow:req_id" or "deny:req_id"
-                if ":" in content:
-                    decision, resp_id = content.split(":", 1)
-                    if resp_id == req_id and decision in ("allow", "always", "deny"):
-                        resp_path.unlink(missing_ok=True)
-                        log.info("Got matching response: %s (id: %s)", decision, resp_id)
-                        respond("allow" if decision in ("allow", "always") else "deny")
-                        return
-                    else:
-                        resp_path.unlink(missing_ok=True)
-                        log.warning("Stale/mismatched response: %s (expected id: %s)", content, req_id)
-                else:
-                    resp_path.unlink(missing_ok=True)
-                    log.warning("Invalid response format: %s", content)
+                decision = resp_path.read_text().strip()
+                resp_path.unlink(missing_ok=True)
+                if decision in ("allow", "always", "deny"):
+                    log.info("Got response: %s (id: %s)", decision, req_id)
+                    # Edit the Telegram message to show the decision
+                    dots = {"allow": "\U0001f7e2", "always": "\U0001f535", "deny": "\U0001f7e0"}
+                    labels = {"allow": "Allowed (once)", "always": "Always allowed", "deny": "Denied"}
+                    done_msg = (
+                        f"{dots[decision]} /{escaped_encoded}  Permission request `{req_id}` — {labels[decision]}\n\n"
+                        f"Tool: `{tool_name}`\n"
+                        f"```\n{input_preview}\n```"
+                    )
+                    try:
+                        bot.edit_message_text(done_msg, chat_id=user_id, message_id=msg_id, parse_mode="Markdown")
+                    except Exception:
+                        pass
+                    respond(decision, suggestions=suggestions if decision == "always" else None)
+                    return
             except OSError as e:
                 log.error("Error reading response file: %s", e)
         time.sleep(POLL_INTERVAL_SECONDS)
 
-    # Timeout — notify and deny
+    # Timeout — edit the Telegram message to show it timed out
     log.info("Timeout reached, denying")
+    timeout_msg = (
+        f"\U0001f534 /{escaped_encoded}  Permission request `{req_id}` — Timed out\n\n"
+        f"Tool: `{tool_name}`\n"
+        f"```\n{input_preview}\n```\n\n"
+        f"Request timed out after {timeout_minutes} min. Permission denied."
+    )
     try:
-        bot = telebot.TeleBot(token)
-        bot.send_message(user_id, f"/{escaped_encoded}  {timeout_message}")
+        bot.edit_message_text(timeout_msg, chat_id=user_id, message_id=msg_id, parse_mode="Markdown")
     except Exception:
         pass
 
-    respond("deny")
+    respond("deny", timeout_message)
 
 
 if __name__ == "__main__":
