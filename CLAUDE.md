@@ -10,7 +10,7 @@ License: GPL v3
 
 ## Architecture
 
-Seven Python scripts:
+Eight Python scripts:
 
 1. **MCP Server** (`server.py`) — FastMCP server exposing:
    - **Tools:** `prompt_now(message)`, `prompt_later(message, target_time?, delay?)`, `message_user(message, file_path?)`
@@ -25,6 +25,7 @@ Seven Python scripts:
    - Priority: queue (oldest due) → input folder (oldest) → config default prompt
    - Sends via `tmux send-keys -l` (literal mode) + separate `Enter`
    - Sets `generating.lock` after sending; skips locked sessions (< 30 min old)
+   - Checks `rate_limit.json` before processing — pauses all sessions until reset time
    - Logs each sent prompt to `history.log`; deletes consumed files
 
 3. **Telegram Bot** (`telebot_runner.py`) — Long-lived process providing user ↔ AI communication:
@@ -45,11 +46,18 @@ Seven Python scripts:
    - Configurable timeout (`permission_timeout_minutes`, default 10min) — denies on timeout
    - Returns JSON `{"decision": "allow"|"always"|"deny"}` to Claude Code
 
-7. **Setup Wizard** (`setup.py`) — Interactive questionary-based setup that:
+7. **Rate Limit Handler** (`rate_limit_handler.py`) — Called by Claude Code `StopFailure` hook (matcher: `rate_limit`):
+   - Writes `~/.ai-sessions/rate_limit.json` with detected timestamp and parsed reset time
+   - Tries to parse reset time from tmux pane content (e.g. "resets at 3pm")
+   - Falls back to configurable `rate_limit_wait_minutes` (default 30min)
+   - Sends Telegram notification with reset time and wait duration
+   - Scheduler reads this file and pauses all sessions until reset
+
+8. **Setup Wizard** (`setup.py`) — Interactive questionary-based setup that:
    - Creates `start.md` from `example.start.md`
    - Configures `config.yaml` with sensible defaults
    - Configures Telegram bot token and user ID
-   - Installs the `Stop`, `Notification`, and `PermissionRequest` hooks in `~/.claude/settings.json`
+   - Installs the `Stop`, `Notification`, `PermissionRequest`, and `StopFailure` hooks in `~/.claude/settings.json`
 
 ## Session Folder Structure (`~/.ai-sessions/`)
 
@@ -58,10 +66,11 @@ Seven Python scripts:
 ├── queue/            # Timestamped prompt files (filename: {YYYYMMDDTHHMMSS}_{rand}.txt)
 ├── input/            # Manual fallback prompts (sorted by mtime, oldest first)
 ├── generating.lock       # Present while AI is working (contains timestamp)
-├── permission_response   # Written by Telegram bot for permission handler
+├── permissions/          # Per-request permission response files (filename: request ID)
 └── history.log           # Audit log of all sent prompts
 
 ~/.ai-sessions/session_map.json   # Auto-generated command ↔ session mapping
+~/.ai-sessions/rate_limit.json    # Present during rate limit (contains reset time)
 ```
 
 ## Key Files
@@ -74,6 +83,7 @@ Seven Python scripts:
 | `reset_generating.py` | Hook script to clear generating lock |
 | `notify_user.py` | Hook script to notify user via Telegram when AI needs attention |
 | `permission_handler.py` | Hook script for remote permission approval via Telegram |
+| `rate_limit_handler.py` | Hook script for rate limit detection, pausing, and notification |
 | `session_mapper.py` | Shared session name encoding/decoding and tmux pane detection |
 | `setup.py` | Interactive setup wizard |
 | `config.yaml` | Default prompt, base_dir, intervals, Telegram credentials |

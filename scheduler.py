@@ -1,3 +1,4 @@
+import json
 import os
 import time
 import subprocess
@@ -5,6 +6,7 @@ import logging
 from pathlib import Path
 from datetime import datetime
 
+import telebot
 import yaml
 
 # Tracks when a prompt was last sent to each session (any type: queue, input, or default)
@@ -153,6 +155,15 @@ def process_session(session_dir: Path, config: dict) -> None:
     elif prompt_text.startswith("/"):
         prompt_text = prompt_text[1:]
 
+    # Prefix prompts with timestamp and source label
+    utc_now = datetime.utcnow().strftime("%Y-%m-%d %H:%M utc")
+    if source == "input":
+        prompt_text = f"[{utc_now}] User: {prompt_text}"
+    elif source == "queue":
+        prompt_text = f"[{utc_now}] AI: {prompt_text}"
+    elif source == "default":
+        prompt_text = f"[{utc_now}] {prompt_text}"
+
     log.info("Sending to %s [%s]: %.80s", pane_target, source, prompt_text.replace("\n", " "))
 
     if not send_prompt(pane_target, prompt_text):
@@ -166,6 +177,45 @@ def process_session(session_dir: Path, config: dict) -> None:
         consumed_file.unlink(missing_ok=True)
 
 
+def check_rate_limit(base_dir: Path, config: dict) -> bool:
+    """Check if a rate limit is active. Returns True if we should skip all sessions.
+
+    Deletes the rate limit file once the reset time has passed and sends
+    a Telegram notification that the limit has been lifted.
+    """
+    rate_limit_path = base_dir / "rate_limit.json"
+    if not rate_limit_path.exists():
+        return False
+
+    try:
+        data = json.loads(rate_limit_path.read_text())
+        reset_time = datetime.fromisoformat(data["reset_time"])
+    except (json.JSONDecodeError, KeyError, ValueError) as e:
+        log.warning("Invalid rate_limit.json, removing: %s", e)
+        rate_limit_path.unlink(missing_ok=True)
+        return False
+
+    if datetime.now() < reset_time:
+        remaining = (reset_time - datetime.now()).total_seconds() / 60
+        log.info("Rate limit active — %.1f min remaining (reset: %s)", remaining, reset_time.strftime("%H:%M"))
+        return True
+
+    # Rate limit has expired — clean up and notify
+    log.info("Rate limit expired, resuming normal operation")
+    rate_limit_path.unlink(missing_ok=True)
+
+    token = config.get("telegram_bot_token")
+    user_id = config.get("telegram_user_id")
+    if token and user_id:
+        try:
+            bot = telebot.TeleBot(token)
+            bot.send_message(user_id, "Rate limit has been lifted. Resuming sessions.")
+        except Exception as e:
+            log.error("Failed to send rate limit lifted notification: %s", e)
+
+    return False
+
+
 def main() -> None:
     config = load_config()
     base_dir = Path(config.get("base_dir", "~/.ai-sessions")).expanduser()
@@ -175,8 +225,12 @@ def main() -> None:
 
     while True:
         if base_dir.is_dir():
+            if check_rate_limit(base_dir, config):
+                time.sleep(interval)
+                continue
+
             for entry in sorted(base_dir.iterdir()):
-                if entry.is_dir():
+                if entry.is_dir() and entry.name != "__pycache__":
                     try:
                         process_session(entry, config)
                     except Exception:

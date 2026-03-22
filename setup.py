@@ -16,6 +16,7 @@ CLAUDE_SETTINGS = Path("~/.claude/settings.json").expanduser()
 RESET_SCRIPT = REPO_DIR / "reset_generating.py"
 NOTIFY_SCRIPT = REPO_DIR / "notify_user.py"
 PERMISSION_SCRIPT = REPO_DIR / "permission_handler.py"
+RATE_LIMIT_SCRIPT = REPO_DIR / "rate_limit_handler.py"
 
 
 def setup_start_md() -> None:
@@ -51,6 +52,7 @@ def setup_config() -> None:
         "generating_timeout_minutes": 30,
         "permission_timeout_minutes": 10,
         "permission_timeout_message": "Permission denied (timeout).",
+        "rate_limit_wait_minutes": 30,
     }
 
     if CONFIG_PATH.exists():
@@ -97,6 +99,12 @@ def setup_config() -> None:
         default=defaults["permission_timeout_message"],
     ).ask()
 
+    rate_limit_wait = questionary.text(
+        "Rate limit default wait (minutes, used when reset time can't be parsed):",
+        default=str(defaults["rate_limit_wait_minutes"]),
+        validate=lambda v: v.isdigit() or "Must be a number",
+    ).ask()
+
     config = {
         "default_prompt": default_prompt,
         "base_dir": base_dir,
@@ -105,6 +113,7 @@ def setup_config() -> None:
         "generating_timeout_minutes": int(timeout),
         "permission_timeout_minutes": int(perm_timeout),
         "permission_timeout_message": perm_message,
+        "rate_limit_wait_minutes": int(rate_limit_wait),
     }
 
     # Preserve existing telegram config if present
@@ -169,7 +178,7 @@ def setup_telegram() -> None:
     print(f"  Telegram config saved to {CONFIG_PATH}")
 
 
-def install_hook(settings: dict, event: str, script_path: str, check_name: str) -> bool:
+def install_hook(settings: dict, event: str, script_path: str, check_name: str, matcher: str = "") -> bool:
     hooks = settings.setdefault("hooks", {})
     event_hooks = hooks.setdefault(event, [])
 
@@ -181,7 +190,7 @@ def install_hook(settings: dict, event: str, script_path: str, check_name: str) 
 
     command = f"python3 {script_path}"
     event_hooks.append({
-        "matcher": "",
+        "matcher": matcher,
         "hooks": [{"type": "command", "command": command}],
     })
     return True
@@ -206,6 +215,7 @@ def setup_hook() -> None:
     changed |= install_hook(settings, "Stop", str(RESET_SCRIPT.resolve()), "reset_generating.py")
     changed |= install_hook(settings, "Notification", str(NOTIFY_SCRIPT.resolve()), "notify_user.py")
     changed |= install_hook(settings, "PermissionRequest", str(PERMISSION_SCRIPT.resolve()), "permission_handler.py")
+    changed |= install_hook(settings, "StopFailure", str(RATE_LIMIT_SCRIPT.resolve()), "rate_limit_handler.py", matcher="rate_limit")
 
     if changed:
         CLAUDE_SETTINGS.parent.mkdir(parents=True, exist_ok=True)
