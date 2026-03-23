@@ -1,6 +1,7 @@
 """Tmux CLI wrapper."""
 
 import subprocess
+import time
 
 
 class NotInTmuxError(Exception):
@@ -40,12 +41,13 @@ class TmuxClient:
             return "unknown"
 
     def send_keys(self, pane: str, text: str) -> bool:
-        """Send *text* to *pane* in literal mode, then press Enter."""
+        """Send *text* to *pane* in literal mode, then press Enter after a short delay."""
         try:
             subprocess.run(
                 ["tmux", "send-keys", "-t", pane, "-l", text],
                 check=True, capture_output=True, text=True, timeout=10,
             )
+            time.sleep(0.5)
             subprocess.run(
                 ["tmux", "send-keys", "-t", pane, "Enter"],
                 check=True, capture_output=True, text=True, timeout=10,
