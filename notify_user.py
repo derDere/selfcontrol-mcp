@@ -1,36 +1,21 @@
 #!/usr/bin/env python3
-"""Sends a Telegram notification when Claude Code needs user attention."""
+"""Notification hook — sends a Telegram message when Claude Code needs user attention."""
 
 import json
 import sys
-from pathlib import Path
 
-import telebot
-import yaml
-
-SCRIPT_DIR = Path(__file__).parent
-CONFIG_PATH = SCRIPT_DIR / "config.yaml"
-
-
-from session_mapper import encode_session_name, get_pane_id
+from lib import Config, TmuxClient, TelegramClient, SessionManager
 
 
 def main() -> None:
-    if not CONFIG_PATH.exists():
+    config = Config()
+    if not config.telegram_bot_token or not config.telegram_user_id:
         return
 
-    with open(CONFIG_PATH) as f:
-        config = yaml.safe_load(f) or {}
+    pane_id = TmuxClient().get_pane_id_safe()
+    encoded = SessionManager.encode_name(pane_id)
 
-    token = config.get("telegram_bot_token")
-    user_id = config.get("telegram_user_id")
-    if not token or not user_id:
-        return
-
-    pane_id = get_pane_id()
-    encoded = encode_session_name(pane_id)
-
-    # Read hook input from stdin if available
+    # Read hook input from stdin
     detail = ""
     if not sys.stdin.isatty():
         try:
@@ -39,22 +24,14 @@ def main() -> None:
         except (json.JSONDecodeError, Exception):
             pass
 
-    # Skip if this is a permission-related notification (handled by permission_handler.py)
-    detail_lower = detail.lower()
-    if any(word in detail_lower for word in ("permission", "approval", "approve", "waiting")):
+    # Skip permission-related notifications (handled by permission_handler.py)
+    if any(w in detail.lower() for w in ("permission", "approval", "approve", "waiting")):
         return
 
     message = f"/{encoded}  Needs attention\n\n"
-    if detail:
-        message += detail
-    else:
-        message += "Claude Code is waiting for approval or input."
+    message += detail or "Claude Code is waiting for approval or input."
 
-    try:
-        bot = telebot.TeleBot(token)
-        bot.send_message(user_id, message)
-    except Exception:
-        pass
+    TelegramClient(config.telegram_bot_token, config.telegram_user_id).send_message(message)
 
 
 if __name__ == "__main__":

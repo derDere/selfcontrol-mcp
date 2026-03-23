@@ -1,28 +1,14 @@
-import subprocess
-from pathlib import Path
+"""Stop hook — clears the generating lock for the current tmux pane."""
 
-BASE_DIR = Path("~/.ai-sessions").expanduser()
+from lib import Config, Session, TmuxClient, NotInTmuxError
 
 
 def main() -> None:
     try:
-        result = subprocess.run(
-            ["tmux", "display-message", "-p", "#{session_name}:#{window_index}.#{pane_index}"],
-            capture_output=True, text=True, timeout=5,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pane_id = TmuxClient().get_pane_id()
+    except NotInTmuxError:
         return
-
-    if result.returncode != 0:
-        return
-
-    pane_id = result.stdout.strip()
-    if not pane_id:
-        return
-
-    lock_path = BASE_DIR / pane_id / "generating.lock"
-    if lock_path.exists():
-        lock_path.unlink()
+    Session(pane_id, Config().base_dir).clear_lock()
 
 
 if __name__ == "__main__":

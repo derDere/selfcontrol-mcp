@@ -8,7 +8,8 @@ from pathlib import Path
 import questionary
 import yaml
 
-REPO_DIR = Path(__file__).parent
+from lib.config import REPO_DIR
+
 CONFIG_PATH = REPO_DIR / "config.yaml"
 EXAMPLE_START = REPO_DIR / "example.start.md"
 START_MD = REPO_DIR / "start.md"
@@ -106,7 +107,6 @@ def setup_config() -> None:
         "generating_timeout_minutes": int(timeout),
         "permission_timeout_minutes": int(perm_timeout),
         "permission_timeout_message": perm_message,
-        "rate_limit_wait_minutes": int(rate_limit_wait),
     }
 
     # Preserve existing telegram config if present

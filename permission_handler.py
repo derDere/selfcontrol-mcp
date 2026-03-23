@@ -1,25 +1,16 @@
 #!/usr/bin/env python3
 """PermissionRequest hook — sends permission requests to Telegram for remote approval.
 
-This hook ONLY fires when Claude Code would normally show a permission dialog.
-Tools that are already allowed never trigger this hook.
-
 Each request gets a unique short ID to prevent stale responses from
 accidentally approving unrelated future requests.
 """
 
 import json
 import logging
-import random
-import string
 import sys
 import time
-from pathlib import Path
 
-import telebot
-import yaml
-
-from session_mapper import encode_session_name, escape_for_markdown, get_pane_id
+from lib import Config, Session, TmuxClient, TelegramClient, SessionManager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,24 +20,17 @@ logging.basicConfig(
 )
 log = logging.getLogger("permission_handler")
 
-SCRIPT_DIR = Path(__file__).parent
-CONFIG_PATH = SCRIPT_DIR / "config.yaml"
 POLL_INTERVAL_SECONDS = 2
-
-
-def random_id(length: int = 4) -> str:
-    return "".join(random.choices(string.ascii_lowercase + string.digits, k=length))
 
 
 def respond(decision: str, message: str = "", suggestions: list | None = None) -> None:
     """Print the decision JSON to stdout and exit."""
     log.info("Responding: %s", decision)
     behavior = "allow" if decision == "always" else decision
-    decision_obj = {"behavior": behavior}
+    decision_obj: dict = {"behavior": behavior}
     if message and decision == "deny":
         decision_obj["message"] = message
     if decision == "always" and suggestions:
-        # Pass through permission_suggestions so Claude Code persists the rule
         allow_suggestions = [s for s in suggestions if s.get("behavior") == "allow"]
         if allow_suggestions:
             decision_obj["updatedPermissions"] = allow_suggestions
@@ -60,7 +44,7 @@ def respond(decision: str, message: str = "", suggestions: list | None = None) -
 
 
 def main() -> None:
-    # Read hook input from stdin
+    # Read hook input
     hook_data = {}
     if not sys.stdin.isatty():
         try:
@@ -73,106 +57,77 @@ def main() -> None:
     suggestions = hook_data.get("permission_suggestions", [])
     has_always = len(suggestions) > 0
 
-    if not CONFIG_PATH.exists():
+    config = Config()
+    if not config.telegram_bot_token or not config.telegram_user_id:
         return
 
-    with open(CONFIG_PATH) as f:
-        config = yaml.safe_load(f) or {}
-
-    token = config.get("telegram_bot_token")
-    user_id = config.get("telegram_user_id")
-    if not token or not user_id:
-        return
-
-    timeout_minutes = config.get("permission_timeout_minutes", 10)
-    timeout_message = config.get("permission_timeout_message", "Permission denied (timeout).")
-    base_dir = Path(config.get("base_dir", "~/.ai-sessions")).expanduser()
-
-    pane_id = get_pane_id()
-    encoded = encode_session_name(pane_id)
+    pane_id = TmuxClient().get_pane_id_safe()
+    session = Session(pane_id, config.base_dir)
+    encoded = SessionManager.encode_name(pane_id)
 
     # Generate unique request ID
-    req_id = random_id()
+    req_id = Session.random_suffix(4)
     log.info("Permission request %s for tool=%s in session=%s", req_id, tool_name, pane_id)
 
-    # Response file unique to this request
-    perm_dir = base_dir / pane_id / "permissions"
-    perm_dir.mkdir(parents=True, exist_ok=True)
-    resp_path = perm_dir / req_id
+    session.permissions_dir.mkdir(parents=True, exist_ok=True)
 
     # Format tool input for display
     input_preview = json.dumps(tool_input, indent=2, ensure_ascii=False)
     if len(input_preview) > 500:
         input_preview = input_preview[:500] + "\n..."
 
-    # Build Telegram message with request-ID-specific commands
-    escaped_encoded = escape_for_markdown(encoded)
-    escaped_id = escape_for_markdown(req_id)
-    commands = (
-        f"/{escaped_encoded}\\_allow\\_{escaped_id} — Allow once\n"
-    )
+    # Build Telegram message with request-specific commands
+    esc_enc = SessionManager.escape_markdown(encoded)
+    esc_id = SessionManager.escape_markdown(req_id)
+    commands = f"/{esc_enc}\\_allow\\_{esc_id} \u2014 Allow once\n"
     if has_always:
-        commands += f"/{escaped_encoded}\\_always\\_{escaped_id} — Always allow\n"
-    commands += f"/{escaped_encoded}\\_deny\\_{escaped_id} — Deny"
+        commands += f"/{esc_enc}\\_always\\_{esc_id} \u2014 Always allow\n"
+    commands += f"/{esc_enc}\\_deny\\_{esc_id} \u2014 Deny"
 
     message = (
-        f"/{escaped_encoded}  Permission request `{req_id}`\n\n"
+        f"/{esc_enc}  Permission request `{req_id}`\n\n"
         f"Tool: `{tool_name}`\n"
         f"```\n{input_preview}\n```\n\n"
         f"{commands}"
     )
 
-    try:
-        bot = telebot.TeleBot(token)
-        sent = bot.send_message(user_id, message, parse_mode="Markdown")
-        msg_id = sent.message_id
-        log.info("Permission request sent to Telegram (msg_id: %s)", msg_id)
-    except Exception as e:
-        log.error("Failed to send Telegram message: %s", e)
+    telegram = TelegramClient(config.telegram_bot_token, config.telegram_user_id)
+    msg_id = telegram.send_message(message, parse_mode="Markdown")
+    if msg_id is None:
+        log.error("Failed to send Telegram message")
         return
+    log.info("Permission request sent (msg_id: %s)", msg_id)
 
-    # Poll for response file (filename IS the request ID, content is the decision)
-    log.info("Polling for response at %s (timeout: %d min)", resp_path, timeout_minutes)
-    deadline = time.time() + (timeout_minutes * 60)
+    # Poll for response
+    log.info("Polling for response (timeout: %d min)", config.permission_timeout_minutes)
+    deadline = time.time() + config.permission_timeout_minutes * 60
+
     while time.time() < deadline:
-        if resp_path.exists():
-            try:
-                decision = resp_path.read_text().strip()
-                resp_path.unlink(missing_ok=True)
-                if decision in ("allow", "always", "deny"):
-                    log.info("Got response: %s (id: %s)", decision, req_id)
-                    # Edit the Telegram message to show the decision
-                    dots = {"allow": "\U0001f7e2", "always": "\U0001f535", "deny": "\U0001f7e0"}
-                    labels = {"allow": "Allowed (once)", "always": "Always allowed", "deny": "Denied"}
-                    done_msg = (
-                        f"{dots[decision]} /{escaped_encoded}  Permission request `{req_id}` — {labels[decision]}\n\n"
-                        f"Tool: `{tool_name}`\n"
-                        f"```\n{input_preview}\n```"
-                    )
-                    try:
-                        bot.edit_message_text(done_msg, chat_id=user_id, message_id=msg_id, parse_mode="Markdown")
-                    except Exception:
-                        pass
-                    respond(decision, suggestions=suggestions if decision == "always" else None)
-                    return
-            except OSError as e:
-                log.error("Error reading response file: %s", e)
+        decision = session.read_permission_response(req_id)
+        if decision:
+            log.info("Got response: %s (id: %s)", decision, req_id)
+            dots = {"allow": "\U0001f7e2", "always": "\U0001f535", "deny": "\U0001f7e0"}
+            labels = {"allow": "Allowed (once)", "always": "Always allowed", "deny": "Denied"}
+            telegram.edit_message(
+                msg_id,
+                f"{dots[decision]} /{esc_enc}  Permission request `{req_id}` \u2014 {labels[decision]}\n\n"
+                f"Tool: `{tool_name}`\n```\n{input_preview}\n```",
+                parse_mode="Markdown",
+            )
+            respond(decision, suggestions=suggestions if decision == "always" else None)
+            return
         time.sleep(POLL_INTERVAL_SECONDS)
 
-    # Timeout — edit the Telegram message to show it timed out
+    # Timeout
     log.info("Timeout reached, denying")
-    timeout_msg = (
-        f"\U0001f534 /{escaped_encoded}  Permission request `{req_id}` — Timed out\n\n"
-        f"Tool: `{tool_name}`\n"
-        f"```\n{input_preview}\n```\n\n"
-        f"Request timed out after {timeout_minutes} min. Permission denied."
+    telegram.edit_message(
+        msg_id,
+        f"\U0001f534 /{esc_enc}  Permission request `{req_id}` \u2014 Timed out\n\n"
+        f"Tool: `{tool_name}`\n```\n{input_preview}\n```\n\n"
+        f"Request timed out after {config.permission_timeout_minutes} min. Permission denied.",
+        parse_mode="Markdown",
     )
-    try:
-        bot.edit_message_text(timeout_msg, chat_id=user_id, message_id=msg_id, parse_mode="Markdown")
-    except Exception:
-        pass
-
-    respond("deny", timeout_message)
+    respond("deny", config.permission_timeout_message)
 
 
 if __name__ == "__main__":
